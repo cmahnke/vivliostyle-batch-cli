@@ -11,10 +11,10 @@
   },
   "scripts": {
     "test": "vitest",
-    "build": "rimraf dist/* && rollup -c",
+    "build": "npx rimraf dist/* && npx rollup -c",
     "start": "node dist/vivliostyle-cli.js",
-    "format": "prettier . --check",
-    "clean": "rimraf dist/*",
+    "format": "npx prettier . --check",
+    "clean": "npx rimraf dist/*",
     "lint": "npx tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
