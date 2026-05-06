@@ -10,7 +10,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "test": "vitest",
+    "test": "npx vitest",
     "build": "npx rimraf dist/* && npx rollup -c",
     "start": "node dist/vivliostyle-cli.js",
     "format": "npx prettier . --check",

@@ -28,6 +28,7 @@ jobs:
           npm i
           npm run lint
           npm run format
+          npm run test
           npx tsc -b --verbose
           npx rollup --config
           npx prettier --check .
@@ -68,6 +69,9 @@ jobs:
       - name: Run build
         run: |
           bun run build
+      - name: Run test
+        run: |
+          bun run test
 
   deno:
     runs-on: ubuntu-24.04
@@ -86,3 +90,6 @@ jobs:
       - name: Run build
         run: |
           deno run build
+      - name: Run test
+        run: |
+          deno run test
