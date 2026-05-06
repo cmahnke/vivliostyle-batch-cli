@@ -15,7 +15,7 @@
     "start": "node dist/vivliostyle-cli.js",
     "format": "prettier . --check",
     "clean": "rimraf dist/*",
-    "lint": "tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0"
+    "lint": "npx tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
     "@vivliostyle/cli": "^10.5.0",
