@@ -1,0 +1,29 @@
+blank_issues_enabled: true
+
+issue_templates:
+  - name: Bug report
+    description: Bugs and unexpected behavior
+    labels: [Bug]
+    file: bug_report.yml
+
+  - name: Feature request
+    description: "Possible improvements - please don't suggest things covered by other Rollup plugins"
+    labels: [Feature]
+    file: feature_request.yml
+
+contact_links:
+  - name: Documentation
+    url: https://github.com/cmahnke/rollup-plugin-inline-wasm#readme
+    about: Please read the documentation before opening an issue.
+
+  - name: Discussions
+    url: https://github.com/cmahnke/rollup-plugin-inline-wasm/discussions
+    about: Have a general question or idea? Start a discussion instead.
+
+  - name: Rollup Issues
+    url: https://github.com/rollup/rollup/issues
+    about: If your issue is related to Rollup itself, please open an issue there.
+
+  - name: Node.js Compatibility
+    url: https://nodejs.org/en/about/releases
+    about: Check if your Node.js version is still actively supported.

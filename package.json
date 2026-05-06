@@ -1,0 +1,72 @@
+{
+  "name": "@projektemacher/vivliostyle-batch-cli",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "A vivliosty-cli with more options for batch processing",
+  "bin": {
+    "vivliostyle-cli": "./dist/vivliostyle-cli.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "vitest",
+    "build": "rimraf dist/* && rollup -c",
+    "start": "node dist/vivliostyle-cli.js",
+    "format": "prettier . --check",
+    "clean": "rimraf dist/*",
+    "lint": "tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@vivliostyle/cli": "^10.5.0",
+    "commander": "^14.0.3",
+    "express": "^5.2.1",
+    "jsdom": "^29.1.1",
+    "mime-types": "^3.0.2",
+    "serve-static": "^2.2.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^29.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/express": "^5.0.6",
+    "@types/jsdom": "^28.0.1",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^25.6.0",
+    "@types/serve-static": "^2.2.0",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
+    "rimraf": "^6.1.3",
+    "rollup": "^4.60.3",
+    "rollup-plugin-dts": "^6.4.1",
+    "tslib": "^2.8.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2",
+    "vitest": "^4.1.5"
+  },
+  "license": "MIT",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "import": "./dist/vivliostyle-cli.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pdf",
+    "css",
+    "vivliostyle",
+    "print"
+  ],
+  "bugs": {
+    "url": "https://github.com/cmahnke/vivliostyle-batch-cli/issues"
+  },
+  "repository": {
+    "url": "https://github.com/cmahnke/vivliostyle-batch-cli"
+  },
+  "homepage": "https://github.com/cmahnke/vivliostyle-batch-cli#readme"
+}
