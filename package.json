@@ -4,7 +4,7 @@
   "type": "module",
   "description": "A vivliosty-cli with more options for batch processing",
   "bin": {
-    "vivliostyle-cli": "./dist/vivliostyle-cli.js"
+    "vivliostyle-cli": "dist/vivliostyle-cli.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -66,7 +66,7 @@
     "url": "https://github.com/cmahnke/vivliostyle-batch-cli/issues"
   },
   "repository": {
-    "url": "https://github.com/cmahnke/vivliostyle-batch-cli"
+    "url": "git+https://github.com/cmahnke/vivliostyle-batch-cli.git"
   },
   "homepage": "https://github.com/cmahnke/vivliostyle-batch-cli#readme"
 }
