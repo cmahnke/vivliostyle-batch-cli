@@ -962,7 +962,7 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
   } else {
     let previewInput = inputAbs;
     let htmlCleanup = (): void => undefined;
-    let previewStaticMap: Record<string, string> = { ...staticMap };
+    const previewStaticMap: Record<string, string> = { ...staticMap };
 
     if (htmlMode) {
       const { htmlPath, extraStatic, cleanup } = buildPreviewHtml(inputAbs, assetBases, dbg);
