@@ -42,6 +42,12 @@ type CliOptions = {
   preview?: boolean;
 };
 
+// ---------------------------------------------------------------------------
+// Shared debug callback type
+// ---------------------------------------------------------------------------
+
+type Dbg = (_label: string, _value?: unknown) => void;
+
 const validFormats: readonly OutputFormat[] = ["pdf", "epub", "webpub"];
 const validLogLevels: readonly LogLevel[] = ["silent", "info", "verbose", "debug"];
 const validModes: readonly Mode[] = ["build", "preview"];
@@ -63,13 +69,13 @@ export function isHtmlInput(inputAbs: string): boolean {
 // Debug logger
 // ---------------------------------------------------------------------------
 
-function makeDbg(enabled: boolean): (label: string, value?: unknown) => void {
-  return (label: string, value?: unknown): void => {
+function makeDbg(enabled: boolean): Dbg {
+  return (_label: string, _value?: unknown): void => {
     if (!enabled) return;
-    if (value === undefined) {
-      console.error(`[debug] ${label}`);
+    if (_value === undefined) {
+      console.error(`[debug] ${_label}`);
     } else {
-      console.error(`[debug] ${label}`, JSON.stringify(value, null, 2));
+      console.error(`[debug] ${_label}`, JSON.stringify(_value, null, 2));
     }
   };
 }
@@ -109,12 +115,7 @@ function isFile(localPath: string): boolean {
   }
 }
 
-function applyStaticMounts(
-  app: express.Express,
-  staticMap: Record<string, string>,
-  assetBases: AssetBaseMapping[],
-  dbg: (label: string, value?: unknown) => void
-): void {
+function applyStaticMounts(app: express.Express, staticMap: Record<string, string>, assetBases: AssetBaseMapping[], dbg: Dbg): void {
   for (const [virtual, localBase] of Object.entries(staticMap)) {
     const absLocal = resolve(localBase);
     if (isFile(absLocal)) {
@@ -145,7 +146,7 @@ export function startStaticServer(
   staticMap: Record<string, string>,
   assetBases: AssetBaseMapping[],
   htmlFilePath: string | null,
-  dbg: (label: string, value?: unknown) => void,
+  dbg: Dbg,
   port = 0
 ): Promise<StaticServer> {
   const app = express();
@@ -206,7 +207,7 @@ const URL_ATTR_SELECTORS: Array<[string, string]> = [
   ["video[src]", "src"],
   ["audio[src]", "src"],
   ["video[poster]", "poster"],
-  ["input[src]", "src"],
+  ["input[src]", "src"]
 ];
 
 export function rewriteAbsoluteUrlsInDom(document: Document, assetBases: AssetBaseMapping[]): boolean {
@@ -328,7 +329,7 @@ export function extractUrlsFromHtml(htmlPath: string, includeScripts = true, doc
 export function buildPreviewHtml(
   inputAbs: string,
   assetBases: AssetBaseMapping[],
-  dbg: (label: string, value?: unknown) => void
+  dbg: Dbg
 ): { htmlPath: string; extraStatic: Record<string, string>; cleanup: () => void } {
   let content: string;
   try {
@@ -350,7 +351,9 @@ export function buildPreviewHtml(
     if (!virtualPrefix.endsWith("/")) virtualPrefix = `${virtualPrefix}/`;
     const mapKey = virtualPrefix === "/" ? "/" : virtualPrefix.slice(0, -1);
     if (Object.hasOwn(extraStatic, mapKey)) {
-      console.warn(`[buildPreviewHtml] Duplicate assetBase virtual prefix "${mapKey}" — overwriting "${extraStatic[mapKey]}" with "${resolve(ab.localBase)}"`);
+      console.warn(
+        `[buildPreviewHtml] Duplicate assetBase virtual prefix "${mapKey}" — overwriting "${extraStatic[mapKey]}" with "${resolve(ab.localBase)}"`
+      );
     }
     extraStatic[mapKey] = resolve(ab.localBase);
     dbg("buildPreviewHtml: assetBase extra static mount", { mapKey, local: ab.localBase });
@@ -402,7 +405,7 @@ export function prepareInputHtmlForBuild(
   assetBases: AssetBaseMapping[],
   staticMap: Record<string, string>,
   serverBaseUrl: string,
-  dbg: (label: string, value?: unknown) => void
+  dbg: Dbg
 ): { vivliostyleInput: string; cleanup: () => void } {
   let content: string;
   try {
@@ -507,7 +510,7 @@ export function urlToStaticMapping(
   htmlDir: string,
   assetBases: AssetBaseMapping[],
   ignoredAssets: Set<string>,
-  dbg: (label: string, value?: unknown) => void
+  dbg: Dbg
 ): MappingResult {
   const trimmed = url.trim();
   if (!trimmed) return { kind: "skipped", url, reason: "empty URL" };
@@ -715,7 +718,6 @@ function buildProgram(): Command {
       (val: string, prev: string[]) => prev.concat(val),
       []
     )
-    // Fix #11: --no-scripts setzt Commander-intern opts().scripts = false
     .option(
       "--no-scripts",
       [
@@ -863,7 +865,6 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
     const htmlDir = dirname(inputAbs);
     console.log(`[html] Analysing input as HTML: ${inputAbs}`);
 
-    // Fix #11: options.scripts (false wenn --no-scripts gesetzt) statt options.noScripts
     const includeScripts = mode === "preview" ? true : options.scripts;
     const urls = extractUrlsFromHtml(inputAbs, includeScripts);
 
@@ -1021,7 +1022,6 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
 
     dbg("final PreviewConfig", config);
 
-    // Fix #3: htmlCleanup() auch bei normalem preview()-Abschluss aufrufen
     const shutdown = (): void => {
       htmlCleanup();
       process.exit(0);
@@ -1040,7 +1040,6 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
       throw new Error(`preview() failed:\n${message}`);
     }
 
-    // Fix #3: Signal-Handler entfernen UND htmlCleanup() bei normalem Abschluss
     process.off("SIGINT", shutdown);
     process.off("SIGTERM", shutdown);
     htmlCleanup();
@@ -1051,12 +1050,11 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
 // Direct execution
 // ---------------------------------------------------------------------------
 
-// Fix #13: IIFE vereinfacht zu direktem try/catch
 let _resolvedEntry: string | null = null;
 try {
   _resolvedEntry = resolve(fileURLToPath(import.meta.url));
 } catch {
-  // ESM import.meta.url nicht verfügbar — kein direkter Aufruf möglich
+  // ESM import.meta.url not available — not a direct invocation
 }
 
 function isDirectExecution(): boolean {

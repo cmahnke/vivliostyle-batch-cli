@@ -58,23 +58,23 @@ vivliostyle-cli -i index.html -o output.pdf -- --timeout 60000 --debug
 
 ## Options
 
-| Option | Description |
-|--------|-------------|
-| `-i, --input <input>` | Input HTML or publication manifest file (required) |
-| `-o, --output <file>` | Output file path (default: `output.pdf`) |
-| `--title <title>` | Document title (overrides source) |
-| `--author <author>` | Document author |
-| `--language <lang>` | Document language tag (e.g. `en`, `de`, `ja`) (default: `de`) |
-| `--static <mapping>` | Map virtual path to local path: `/virtual/path:/local/path` (repeatable) |
-| `--no-scripts` | Do not map `<script src>` tags as static assets (recommended for PDF builds) |
-| `--asset-base <urlBase=localBase>` | Map URLs starting with `urlBase` to files under `localBase` (repeatable) |
-| `--ignore-asset <path>` | Skip specific virtual paths when deriving static mappings (repeatable) |
-| `--cwd <dir>` | Working directory for Vivliostyle (default: directory of `--input`) |
-| `--format <format>` | Output format: `pdf`, `epub`, or `webpub` (default: `pdf`) |
-| `--log-level <level>` | Log level: `silent`, `info`, `verbose`, or `debug` (default: `info`) |
-| `--mode <mode>` | Execution mode: `build` or `preview` (default: `build`) |
-| `--preview` | Shorthand for `--mode preview` — open result in browser |
-| `-d, --debug` | Enable debug mode (sets log level to `debug`) |
+| Option                             | Description                                                                  |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| `-i, --input <input>`              | Input HTML or publication manifest file (required)                           |
+| `-o, --output <file>`              | Output file path (default: `output.pdf`)                                     |
+| `--title <title>`                  | Document title (overrides source)                                            |
+| `--author <author>`                | Document author                                                              |
+| `--language <lang>`                | Document language tag (e.g. `en`, `de`, `ja`) (default: `de`)                |
+| `--static <mapping>`               | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)     |
+| `--no-scripts`                     | Do not map `<script src>` tags as static assets (recommended for PDF builds) |
+| `--asset-base <urlBase=localBase>` | Map URLs starting with `urlBase` to files under `localBase` (repeatable)     |
+| `--ignore-asset <path>`            | Skip specific virtual paths when deriving static mappings (repeatable)       |
+| `--cwd <dir>`                      | Working directory for Vivliostyle (default: directory of `--input`)          |
+| `--format <format>`                | Output format: `pdf`, `epub`, or `webpub` (default: `pdf`)                   |
+| `--log-level <level>`              | Log level: `silent`, `info`, `verbose`, or `debug` (default: `info`)         |
+| `--mode <mode>`                    | Execution mode: `build` or `preview` (default: `build`)                      |
+| `--preview`                        | Shorthand for `--mode preview` — open result in browser                      |
+| `-d, --debug`                      | Enable debug mode (sets log level to `debug`)                                |
 
 ## Notes
 
