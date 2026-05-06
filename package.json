@@ -1,6 +1,6 @@
 {
   "name": "@projektemacher/vivliostyle-batch-cli",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "A vivliosty-cli with more options for batch processing",
   "bin": {
