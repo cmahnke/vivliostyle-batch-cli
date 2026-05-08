@@ -2,7 +2,7 @@
   "name": "@projektemacher/vivliostyle-batch-cli",
   "version": "0.1.0",
   "type": "module",
-  "description": "A vivliosty-cli with more options for batch processing",
+  "description": "A vivliostyle-cli with more options for batch processing",
   "bin": {
     "vivliostyle-cli": "dist/vivliostyle-cli.js"
   },

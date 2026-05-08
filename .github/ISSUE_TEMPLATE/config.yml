@@ -7,22 +7,30 @@ issue_templates:
     file: bug_report.yml
 
   - name: Feature request
-    description: "Possible improvements - please don't suggest things covered by other Rollup plugins"
+    description: "Possible improvements"
     labels: [Feature]
     file: feature_request.yml
 
 contact_links:
   - name: Documentation
-    url: https://github.com/cmahnke/rollup-plugin-inline-wasm#readme
+    url: https://github.com/cmahnke/vivliostyle-batch-cli#readme
     about: Please read the documentation before opening an issue.
 
   - name: Discussions
-    url: https://github.com/cmahnke/rollup-plugin-inline-wasm/discussions
+    url: https://github.com/cmahnke/vivliostyle-batch-cli/discussions
     about: Have a general question or idea? Start a discussion instead.
 
-  - name: Rollup Issues
-    url: https://github.com/rollup/rollup/issues
-    about: If your issue is related to Rollup itself, please open an issue there.
+  - name: Vivliostyle documentation
+    url: https://docs.vivliostyle.org/cli/
+    about: The general Vivliostyle documentation.
+
+  - name: Vivliostyle CLI Issues
+    url: https://github.com/vivliostyle/vivliostyle-cli/issues
+    about: If your issue is related to Vivliostyle CLI itself, please open an issue there.
+
+  - name: Vivliostyle.js (the base library) Issues
+    url: https://github.com/vivliostyle/vivliostyle.js/issues
+    about: If your issue is related to Vivliostyle.js itself, please open an issue there.
 
   - name: Node.js Compatibility
     url: https://nodejs.org/en/about/releases
