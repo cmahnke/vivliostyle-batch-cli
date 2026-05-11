@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { build, preview } from "@vivliostyle/cli";
 import { resolve, dirname, posix, join } from "node:path";
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, statSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { AddressInfo } from "node:net";
@@ -128,7 +128,13 @@ function applyStaticMounts(app: express.Express, staticMap: Record<string, strin
       console.log(`[static-server] File route: GET ${virtual} → ${absLocal}`);
     } else {
       const mountPath = virtual.endsWith("/") ? virtual : `${virtual}/`;
-      app.use(mountPath, serveStatic(absLocal, { fallthrough: true, setHeaders: makeMimeHeaders }));
+      app.use(
+        mountPath,
+        serveStatic(absLocal, {
+          fallthrough: true,
+          setHeaders: makeMimeHeaders
+        })
+      );
       console.log(`[static-server] Dir mount: ${mountPath} → ${absLocal}`);
     }
     dbg("[static-server] mount", { virtual, absLocal });
@@ -356,7 +362,10 @@ export function buildPreviewHtml(
       );
     }
     extraStatic[mapKey] = resolve(ab.localBase);
-    dbg("buildPreviewHtml: assetBase extra static mount", { mapKey, local: ab.localBase });
+    dbg("buildPreviewHtml: assetBase extra static mount", {
+      mapKey,
+      local: ab.localBase
+    });
   }
 
   const dom = new JSDOM(content);
@@ -519,7 +528,10 @@ export function urlToStaticMapping(
   const absoluteMapped = mapAbsoluteUrlToLocal(trimmed, assetBases);
   if (absoluteMapped) {
     if (shouldIgnoreVirtualPath(absoluteMapped.virtualPath, ignoredAssets)) {
-      dbg("urlToStaticMapping: ignored (asset-base match)", { url, ...absoluteMapped });
+      dbg("urlToStaticMapping: ignored (asset-base match)", {
+        url,
+        ...absoluteMapped
+      });
       return {
         kind: "skipped",
         url,
@@ -541,7 +553,11 @@ export function urlToStaticMapping(
   }
 
   if (trimmed.startsWith("//")) {
-    return { kind: "skipped", url, reason: "protocol-relative external URL" };
+    return {
+      kind: "skipped",
+      url,
+      reason: "protocol-relative external URL"
+    };
   }
 
   if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(trimmed)) {
@@ -555,14 +571,21 @@ export function urlToStaticMapping(
 
   const [cleanUrl] = trimmed.split(/[?#]/);
   if (!cleanUrl) {
-    return { kind: "skipped", url, reason: "URL is empty after stripping query/fragment" };
+    return {
+      kind: "skipped",
+      url,
+      reason: "URL is empty after stripping query/fragment"
+    };
   }
 
   const localPath = resolve(htmlDir, cleanUrl);
   const virtualPath = cleanUrl.startsWith("/") ? posix.normalize(cleanUrl) : posix.resolve("/", posix.relative(htmlDir, localPath));
 
   if (shouldIgnoreVirtualPath(virtualPath, ignoredAssets)) {
-    dbg("urlToStaticMapping: ignored (ignore-asset match)", { url, virtualPath });
+    dbg("urlToStaticMapping: ignored (ignore-asset match)", {
+      url,
+      virtualPath
+    });
     return {
       kind: "skipped",
       url,
@@ -582,7 +605,10 @@ export function urlToStaticMapping(
   return { kind: "mapped", mapping: `${virtualPath}:${localPath}` };
 }
 
-export function parseStaticMapping(mapping: string): { virtual: string; local: string } {
+export function parseStaticMapping(mapping: string): {
+  virtual: string;
+  local: string;
+} {
   if (!mapping.startsWith("/")) {
     throw new Error(`Invalid --static mapping: "${mapping}"\nExpected format: /virtual/path:/local/path`);
   }
@@ -773,7 +799,7 @@ function buildProgram(): Command {
 }
 
 export function printHelp(): void {
-  buildProgram().help();
+  buildProgram().help({ error: false });
 }
 
 export function parseArgs(argv: string[]): {
@@ -975,10 +1001,7 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
           previewStaticMap[virtual] = local;
           console.log(`[preview] AssetBase static mount: ${virtual} → ${local}`);
         } else {
-          dbg("preview: skipping assetBase mount shadowed by explicit --static", {
-            virtual,
-            local
-          });
+          dbg("preview: skipping assetBase mount shadowed by explicit --static", { virtual, local });
         }
       }
 
@@ -1050,18 +1073,13 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
 // Direct execution
 // ---------------------------------------------------------------------------
 
-let _resolvedEntry: string | null = null;
-try {
-  _resolvedEntry = resolve(fileURLToPath(import.meta.url));
-} catch {
-  // ESM import.meta.url not available — not a direct invocation
-}
-
 function isDirectExecution(): boolean {
   const entry = process.argv[1];
-  if (!entry || _resolvedEntry === null) return false;
+  if (!entry) return false;
   try {
-    return resolve(entry) === _resolvedEntry;
+    const realEntry = realpathSync(entry);
+    const realSelf = realpathSync(fileURLToPath(import.meta.url));
+    return realEntry === realSelf;
   } catch {
     return false;
   }
@@ -1075,11 +1093,11 @@ if (isDirectExecution()) {
   const parsed = parseArgs(process.argv);
 
   if (!parsed) {
-    printHelp();
-  } else {
-    execute(parsed.options, parsed.extraArgs).catch((err) => {
-      console.error(err instanceof Error ? err.message : err);
-      process.exit(1);
-    });
+    process.exit(0);
   }
+
+  execute(parsed.options, parsed.extraArgs).catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
 }
