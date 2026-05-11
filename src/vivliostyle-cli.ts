@@ -10,6 +10,15 @@ import express from "express";
 import serveStatic from "serve-static";
 import { JSDOM } from "jsdom";
 
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Response {
+      resolvedLocalPath?: string;
+    }
+  }
+}
+
 type BuildConfig = Parameters<typeof build>[0];
 type PreviewConfig = Parameters<typeof preview>[0];
 type VivliostyleConfigSchema = NonNullable<PreviewConfig["configData"]>;
@@ -105,6 +114,7 @@ type StaticServer = {
 function makeMimeHeaders(res: express.Response, filePath: string): void {
   const mime = mimeLookup(filePath);
   if (mime) res.setHeader("Content-Type", mime);
+  res.resolvedLocalPath = filePath;
 }
 
 function isFile(localPath: string): boolean {
@@ -115,6 +125,20 @@ function isFile(localPath: string): boolean {
   }
 }
 
+function applyRequestLogging(app: express.Express, dbg: Dbg): void {
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    res.on("finish", () => {
+      dbg("[static-server] request", {
+        method: req.method,
+        url: req.url,
+        status: res.statusCode,
+        ...(res.resolvedLocalPath !== undefined ? { resolvedLocalPath: res.resolvedLocalPath } : {})
+      });
+    });
+    next();
+  });
+}
+
 function applyStaticMounts(app: express.Express, staticMap: Record<string, string>, assetBases: AssetBaseMapping[], dbg: Dbg): void {
   for (const [virtual, localBase] of Object.entries(staticMap)) {
     const absLocal = resolve(localBase);
@@ -123,6 +147,7 @@ function applyStaticMounts(app: express.Express, staticMap: Record<string, strin
         dbg("[static-server] serving file", { virtual, absLocal });
         const mime = mimeLookup(absLocal);
         if (mime) res.type(mime);
+        res.resolvedLocalPath = absLocal;
         res.sendFile(absLocal);
       });
       console.log(`[static-server] File route: GET ${virtual} → ${absLocal}`);
@@ -142,7 +167,13 @@ function applyStaticMounts(app: express.Express, staticMap: Record<string, strin
 
   for (const ab of assetBases) {
     const absLocal = resolve(ab.localBase);
-    app.use("/", serveStatic(absLocal, { fallthrough: true, setHeaders: makeMimeHeaders }));
+    app.use(
+      "/",
+      serveStatic(absLocal, {
+        fallthrough: true,
+        setHeaders: makeMimeHeaders
+      })
+    );
     dbg("[static-server] assetBase fallback mount", absLocal);
     console.log(`[static-server] Fallback mount: / → ${absLocal}`);
   }
@@ -158,10 +189,13 @@ export function startStaticServer(
   const app = express();
   app.disable("x-powered-by");
 
+  applyRequestLogging(app, dbg);
+
   if (htmlFilePath !== null) {
     const absHtmlPath = resolve(htmlFilePath);
     app.get("/index.html", (_req, res) => {
       dbg("[static-server] serving HTML entry", absHtmlPath);
+      res.resolvedLocalPath = absHtmlPath;
       res.type("text/html").sendFile(absHtmlPath);
     });
     console.log(`[static-server] HTML entry: /index.html → ${absHtmlPath}`);
@@ -170,6 +204,8 @@ export function startStaticServer(
   applyStaticMounts(app, staticMap, assetBases, dbg);
 
   app.use((req: express.Request, res: express.Response) => {
+    const wouldBe = resolve(".", req.url.split("?")[0]);
+    res.resolvedLocalPath = `(not found) ${wouldBe}`;
     dbg("[static-server] 404", req.url);
     res.status(404).type("text").send(`404 Not Found: ${req.url}`);
   });
@@ -336,7 +372,11 @@ export function buildPreviewHtml(
   inputAbs: string,
   assetBases: AssetBaseMapping[],
   dbg: Dbg
-): { htmlPath: string; extraStatic: Record<string, string>; cleanup: () => void } {
+): {
+  htmlPath: string;
+  extraStatic: Record<string, string>;
+  cleanup: () => void;
+} {
   let content: string;
   try {
     content = readFileSync(inputAbs, "utf-8");
@@ -344,8 +384,6 @@ export function buildPreviewHtml(
     throw new Error(`Error reading HTML file: ${inputAbs}\n${String(err)}`);
   }
 
-  // Derive extra static mounts for each assetBase root so secondary assets
-  // referenced from CSS are also reachable through Vivliostyle's Vite server.
   const extraStatic: Record<string, string> = {};
   for (const ab of assetBases) {
     let virtualPrefix: string;
