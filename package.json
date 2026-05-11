@@ -4,7 +4,7 @@
   "type": "module",
   "description": "A vivliostyle-cli with more options for batch processing",
   "bin": {
-    "vivliostyle-cli": "dist/vivliostyle-cli.js"
+    "vivliostyle-cli": "dist/vivliostyle-batch-cli.js"
   },
   "engines": {
     "node": ">=20.0.0"

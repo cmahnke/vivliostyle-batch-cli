@@ -11,7 +11,7 @@ const configs = [
     input: "./src/vivliostyle-cli.ts",
     external,
     output: {
-      file: "dist/vivliostyle-cli.js",
+      file: "dist/vivliostyle-batch-cli.js",
       format: "es"
     },
     plugins: [
