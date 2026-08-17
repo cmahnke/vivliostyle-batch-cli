@@ -1,23 +1,20 @@
+// src/vivliostyle-cli.ts
+
+// Copyright (c) 2026 Christian Mahnke
+// Licensed under the MIT License.
+
 import { Command } from "commander";
 import { build, preview } from "@vivliostyle/cli";
 import { resolve, dirname, posix, join } from "node:path";
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, statSync, createReadStream, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { AddressInfo } from "node:net";
 import { lookup as mimeLookup } from "mime-types";
-import express from "express";
-import serveStatic from "serve-static";
+import { createServer as createViteServer } from "vite";
+import type { ViteDevServer, Plugin as VitePlugin } from "vite";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { JSDOM } from "jsdom";
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Response {
-      resolvedLocalPath?: string;
-    }
-  }
-}
 
 type BuildConfig = Parameters<typeof build>[0];
 type PreviewConfig = Parameters<typeof preview>[0];
@@ -65,11 +62,6 @@ const validModes: readonly Mode[] = ["build", "preview"];
 // HTML input detection
 // ---------------------------------------------------------------------------
 
-/**
- * Returns true when the input file should be treated as HTML.
- * Vivliostyle also accepts publication manifests (JSON/TOML/JS config files);
- * we detect HTML by extension to avoid trying to parse those as markup.
- */
 export function isHtmlInput(inputAbs: string): boolean {
   return /\.html?$/i.test(inputAbs);
 }
@@ -103,138 +95,178 @@ export function splitArgsAtDoubleDash(argv: string[]): {
 }
 
 // ---------------------------------------------------------------------------
-// Static HTTP server (build mode only)
+// Vite static server (replaces Express)
 // ---------------------------------------------------------------------------
 
 type StaticServer = {
   baseUrl: string;
-  close: () => void;
+  close: () => Promise<void>;
 };
 
-function makeMimeHeaders(res: express.Response, filePath: string): void {
-  const mime = mimeLookup(filePath);
-  if (mime) res.setHeader("Content-Type", mime);
-  res.resolvedLocalPath = filePath;
-}
-
-function isFile(localPath: string): boolean {
+/**
+ * Serve a single local file directly, bypassing Vite's transform pipeline.
+ * Returns true if the file was served, false if it should fall through.
+ */
+function serveLocalFile(localPath: string, res: ServerResponse, dbg: Dbg): boolean {
+  let stat;
   try {
-    return statSync(localPath).isFile();
+    stat = statSync(localPath);
   } catch {
     return false;
   }
+  if (!stat.isFile()) return false;
+
+  const mime = mimeLookup(localPath);
+  if (mime) res.setHeader("Content-Type", mime);
+  res.setHeader("Content-Length", stat.size);
+
+  // CSP: allow framing from localhost so the Vivliostyle viewer can embed pages
+  const frameAncestorsValue = [
+    "'self'",
+    "http://localhost",
+    "https://localhost",
+    "http://localhost:*",
+    "https://localhost:*",
+    "http://127.0.0.1",
+    "https://127.0.0.1",
+    "http://127.0.0.1:*",
+    "https://127.0.0.1:*"
+  ].join(" ");
+  res.setHeader("Content-Security-Policy", `frame-ancestors ${frameAncestorsValue}`);
+
+  dbg("[vite-server] serving file", localPath);
+  createReadStream(localPath).pipe(res);
+  return true;
 }
 
-function applyRequestLogging(app: express.Express, dbg: Dbg): void {
-  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-    res.on("finish", () => {
-      dbg("[static-server] request", {
-        method: req.method,
-        url: req.url,
-        status: res.statusCode,
-        ...(res.resolvedLocalPath !== undefined ? { resolvedLocalPath: res.resolvedLocalPath } : {})
-      });
-    });
-    next();
-  });
-}
+/**
+ * Vite plugin: serves entries from the explicit static map.
+ *
+ * Registered first so it runs before Vite's own transform middleware.
+ * Calling res.end() (via pipe) prevents Vite from processing the request.
+ */
+function createStaticMapPlugin(staticMap: Record<string, string>, dbg: Dbg): VitePlugin {
+  return {
+    name: "vivliostyle-static-map",
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use((req: IncomingMessage, res: ServerResponse, next: () => void) => {
+        const urlPath = (req.url ?? "/").split("?")[0];
 
-function applyStaticMounts(app: express.Express, staticMap: Record<string, string>, assetBases: AssetBaseMapping[], dbg: Dbg): void {
-  for (const [virtual, localBase] of Object.entries(staticMap)) {
-    const absLocal = resolve(localBase);
-    if (isFile(absLocal)) {
-      app.get(virtual, (_req, res) => {
-        dbg("[static-server] serving file", { virtual, absLocal });
-        const mime = mimeLookup(absLocal);
-        if (mime) res.type(mime);
-        res.resolvedLocalPath = absLocal;
-        res.sendFile(absLocal);
+        // exact match — treat as single file
+        if (Object.hasOwn(staticMap, urlPath)) {
+          const localPath = resolve(staticMap[urlPath]);
+          if (serveLocalFile(localPath, res, dbg)) return;
+        }
+
+        // prefix match — treat as directory
+        for (const [virtual, localBase] of Object.entries(staticMap)) {
+          const prefix = virtual.endsWith("/") ? virtual : `${virtual}/`;
+          if (urlPath.startsWith(prefix)) {
+            const relative = urlPath.slice(prefix.length);
+            const localPath = resolve(localBase, relative);
+            if (serveLocalFile(localPath, res, dbg)) return;
+          }
+        }
+
+        next();
       });
-      console.log(`[static-server] File route: GET ${virtual} → ${absLocal}`);
-    } else {
-      const mountPath = virtual.endsWith("/") ? virtual : `${virtual}/`;
-      app.use(
-        mountPath,
-        serveStatic(absLocal, {
-          fallthrough: true,
-          setHeaders: makeMimeHeaders
-        })
-      );
-      console.log(`[static-server] Dir mount: ${mountPath} → ${absLocal}`);
     }
-    dbg("[static-server] mount", { virtual, absLocal });
-  }
-
-  for (const ab of assetBases) {
-    const absLocal = resolve(ab.localBase);
-    app.use(
-      "/",
-      serveStatic(absLocal, {
-        fallthrough: true,
-        setHeaders: makeMimeHeaders
-      })
-    );
-    dbg("[static-server] assetBase fallback mount", absLocal);
-    console.log(`[static-server] Fallback mount: / → ${absLocal}`);
-  }
+  };
 }
 
-export function startStaticServer(
+/**
+ * Vite plugin: serves files that match an assetBase URL prefix.
+ *
+ * Registered after the static-map plugin so explicit mappings take priority.
+ */
+function createAssetBasePlugin(assetBases: AssetBaseMapping[], dbg: Dbg): VitePlugin {
+  return {
+    name: "vivliostyle-asset-base",
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use((req: IncomingMessage, res: ServerResponse, next: () => void) => {
+        const urlPath = (req.url ?? "/").split("?")[0];
+
+        for (const ab of assetBases) {
+          const localPath = resolve(ab.localBase, urlPath.replace(/^\//, ""));
+          if (serveLocalFile(localPath, res, dbg)) return;
+        }
+
+        next();
+      });
+    }
+  };
+}
+
+export async function startStaticServer(
   staticMap: Record<string, string>,
   assetBases: AssetBaseMapping[],
   htmlFilePath: string | null,
   dbg: Dbg,
   port = 0
 ): Promise<StaticServer> {
-  const app = express();
-  app.disable("x-powered-by");
+  // Collect every local root Vite must be allowed to read from.
+  const fsAllow = [...Object.values(staticMap).map((p) => resolve(p)), ...assetBases.map((ab) => resolve(ab.localBase))];
+  if (htmlFilePath !== null) fsAllow.push(resolve(dirname(htmlFilePath)));
 
-  applyRequestLogging(app, dbg);
+  const plugins: VitePlugin[] = [createStaticMapPlugin(staticMap, dbg), createAssetBasePlugin(assetBases, dbg)];
 
+  // Serve the HTML entry at /index.html when requested.
   if (htmlFilePath !== null) {
     const absHtmlPath = resolve(htmlFilePath);
-    app.get("/index.html", (_req, res) => {
-      dbg("[static-server] serving HTML entry", absHtmlPath);
-      res.resolvedLocalPath = absHtmlPath;
-      res.type("text/html").sendFile(absHtmlPath);
+    plugins.push({
+      name: "vivliostyle-html-entry",
+      configureServer(server: ViteDevServer) {
+        server.middlewares.use((req: IncomingMessage, res: ServerResponse, next: () => void) => {
+          if (req.url?.split("?")[0] === "/index.html") {
+            dbg("[vite-server] serving HTML entry", absHtmlPath);
+            if (serveLocalFile(absHtmlPath, res, dbg)) return;
+          }
+          next();
+        });
+      }
     });
-    console.log(`[static-server] HTML entry: /index.html → ${absHtmlPath}`);
   }
 
-  applyStaticMounts(app, staticMap, assetBases, dbg);
-
-  app.use((req: express.Request, res: express.Response) => {
-    const wouldBe = resolve(".", req.url.split("?")[0]);
-    res.resolvedLocalPath = `(not found) ${wouldBe}`;
-    dbg("[static-server] 404", req.url);
-    res.status(404).type("text").send(`404 Not Found: ${req.url}`);
+  const vite = await createViteServer({
+    // No project root — we route everything ourselves.
+    root: "/",
+    // Suppress Vite's own config file discovery; we don't want a vite.config.ts
+    // from the user's project interfering.
+    configFile: false,
+    server: {
+      port: port === 0 ? undefined : port,
+      strictPort: port !== 0,
+      host: "127.0.0.1",
+      fs: {
+        // Disable the default deny-list so our explicit allow list is the
+        // sole arbiter of what can be read.
+        strict: true,
+        allow: fsAllow.length > 0 ? fsAllow : ["/"]
+      }
+    },
+    plugins,
+    // We serve pre-built assets; Vite's dep optimiser and HMR are unwanted.
+    optimizeDeps: { noDiscovery: true, include: [] },
+    // Silence Vite's own console output — our wrapper already logs what matters.
+    logLevel: "silent"
   });
 
-  return new Promise((resolvePromise, reject) => {
-    const httpServer = app.listen(port, "127.0.0.1", () => {
-      const addr = httpServer.address() as AddressInfo;
-      const baseUrl = `http://127.0.0.1:${addr.port}`;
-      console.log(`[static-server] Listening on ${baseUrl}`);
-      dbg("[static-server] staticMap", staticMap);
-      dbg(
-        "[static-server] assetBase roots",
-        assetBases.map((ab) => ab.localBase)
-      );
+  await vite.listen();
 
-      let closed = false;
-      const close = (): void => {
-        if (closed) return;
-        closed = true;
-        httpServer.close((err) => {
-          if (err) console.warn(`[static-server] close error: ${err.message}`);
-          else dbg("[static-server] stopped");
-        });
-      };
+  const addr = vite.httpServer!.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${addr.port}`;
 
-      resolvePromise({ baseUrl, close });
-    });
-    httpServer.once("error", reject);
-  });
+  console.log(`[vite-server] Listening on ${baseUrl}`);
+  dbg("[vite-server] staticMap", staticMap);
+  dbg(
+    "[vite-server] assetBase roots",
+    assetBases.map((ab) => ab.localBase)
+  );
+
+  return {
+    baseUrl,
+    close: () => vite.close()
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +284,48 @@ const URL_ATTR_SELECTORS: Array<[string, string]> = [
   ["input[src]", "src"]
 ];
 
+// ---------------------------------------------------------------------------
+// Asset base match result
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminated union returned by mapAbsoluteUrlToLocal.
+ *
+ * - "mapped"    — the URL matched an asset-base prefix and has a sub-path that
+ *                 can be mapped to a local file.
+ * - "root-only" — the URL matched a prefix but carried no sub-path (i.e. the
+ *                 URL is exactly the base root).  The caller should skip it
+ *                 with a precise message rather than treating it as an
+ *                 unrecognised external URL.
+ * - "no-match"  — no asset-base prefix matched; caller handles as usual.
+ */
+type AssetBaseMatch = { kind: "mapped"; virtualPath: string; localPath: string } | { kind: "root-only" } | { kind: "no-match" };
+
+export function mapAbsoluteUrlToLocal(url: string, assetBases: AssetBaseMapping[]): AssetBaseMatch {
+  for (const mapping of assetBases) {
+    if (!url.startsWith(mapping.urlBase)) continue;
+
+    let cleanRelative: string;
+    try {
+      cleanRelative = new URL(url).pathname.slice(1);
+    } catch {
+      const noQuery = url.slice(mapping.urlBase.length).split("?")[0];
+      cleanRelative = noQuery.split("#")[0];
+    }
+
+    if (!cleanRelative) {
+      // The URL points to the asset-base root itself
+      // (e.g. https://cdn.example.com/ with no sub-path).
+      return { kind: "root-only" };
+    }
+
+    const virtualPath = posix.resolve("/", cleanRelative);
+    const localPath = resolve(mapping.localBase, cleanRelative);
+    return { kind: "mapped", virtualPath, localPath };
+  }
+  return { kind: "no-match" };
+}
+
 export function rewriteAbsoluteUrlsInDom(document: Document, assetBases: AssetBaseMapping[]): boolean {
   if (assetBases.length === 0) return false;
   let changed = false;
@@ -259,11 +333,12 @@ export function rewriteAbsoluteUrlsInDom(document: Document, assetBases: AssetBa
   for (const [selector, attr] of URL_ATTR_SELECTORS) {
     for (const el of document.querySelectorAll(selector)) {
       const val = el.getAttribute(attr) ?? "";
-      const mapped = mapAbsoluteUrlToLocal(val, assetBases);
-      if (mapped) {
-        el.setAttribute(attr, mapped.virtualPath);
+      const match = mapAbsoluteUrlToLocal(val, assetBases);
+      if (match.kind === "mapped") {
+        el.setAttribute(attr, match.virtualPath);
         changed = true;
       }
+      // "root-only" and "no-match" — leave the attribute unchanged
     }
   }
 
@@ -350,24 +425,6 @@ export function extractUrlsFromHtml(htmlPath: string, includeScripts = true, doc
 // Preview HTML builder
 // ---------------------------------------------------------------------------
 
-/**
- * Rewrites absolute external URLs to root-relative virtual paths and writes
- * the result as a sibling of the original input file so that
- * cwd = dirname(inputAbs) remains valid for Vivliostyle's path resolution.
- *
- * The output filename uses a non-dotfile prefix so Vite's static server
- * (which ignores dotfiles by default) can serve it correctly.
- *
- * Also derives extra static mounts from each assetBase so that secondary
- * assets referenced from CSS (fonts, images) are served by Vivliostyle's
- * own Vite server without needing Express.
- *
- * Returns:
- *  - htmlPath    – sibling file path, or inputAbs if no rewriting was needed
- *  - extraStatic – virtual→local entries for assetBase roots to merge into
- *                  the static map passed to Vivliostyle
- *  - cleanup     – deletes the sibling file (no-op if inputAbs was returned)
- */
 export function buildPreviewHtml(
   inputAbs: string,
   assetBases: AssetBaseMapping[],
@@ -400,10 +457,7 @@ export function buildPreviewHtml(
       );
     }
     extraStatic[mapKey] = resolve(ab.localBase);
-    dbg("buildPreviewHtml: assetBase extra static mount", {
-      mapKey,
-      local: ab.localBase
-    });
+    dbg("buildPreviewHtml: assetBase extra static mount", { mapKey, local: ab.localBase });
   }
 
   const dom = new JSDOM(content);
@@ -441,12 +495,6 @@ export function buildPreviewHtml(
 // Build HTML builder
 // ---------------------------------------------------------------------------
 
-/**
- * Prepares the HTML for BUILD mode.
- * Both rewrite passes (absolute → virtual, virtual → absolute server URL)
- * are applied in a single DOM parse.
- * If nothing changed the original file path is returned with a no-op cleanup.
- */
 export function prepareInputHtmlForBuild(
   inputAbs: string,
   assetBases: AssetBaseMapping[],
@@ -525,27 +573,6 @@ export function parseAssetBaseMapping(value: string): AssetBaseMapping {
   return { urlBase: normalizeUrlBase(urlBase), localBase };
 }
 
-export function mapAbsoluteUrlToLocal(url: string, assetBases: AssetBaseMapping[]): { virtualPath: string; localPath: string } | null {
-  for (const mapping of assetBases) {
-    if (!url.startsWith(mapping.urlBase)) continue;
-
-    let cleanRelative: string;
-    try {
-      cleanRelative = new URL(url).pathname.slice(1);
-    } catch {
-      const noQuery = url.slice(mapping.urlBase.length).split("?")[0];
-      cleanRelative = noQuery.split("#")[0];
-    }
-
-    if (!cleanRelative) return null;
-
-    const virtualPath = posix.resolve("/", cleanRelative);
-    const localPath = resolve(mapping.localBase, cleanRelative);
-    return { virtualPath, localPath };
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // MappingResult + urlToStaticMapping
 // ---------------------------------------------------------------------------
@@ -563,39 +590,43 @@ export function urlToStaticMapping(
   if (!trimmed) return { kind: "skipped", url, reason: "empty URL" };
   if (trimmed.startsWith("#")) return { kind: "skipped", url, reason: "fragment-only URL" };
 
-  const absoluteMapped = mapAbsoluteUrlToLocal(trimmed, assetBases);
-  if (absoluteMapped) {
-    if (shouldIgnoreVirtualPath(absoluteMapped.virtualPath, ignoredAssets)) {
-      dbg("urlToStaticMapping: ignored (asset-base match)", {
-        url,
-        ...absoluteMapped
-      });
+  const assetMatch = mapAbsoluteUrlToLocal(trimmed, assetBases);
+
+  if (assetMatch.kind === "root-only") {
+    return {
+      kind: "skipped",
+      url,
+      reason: "URL matches an asset-base prefix but has no path component (root URL)"
+    };
+  }
+
+  if (assetMatch.kind === "mapped") {
+    if (shouldIgnoreVirtualPath(assetMatch.virtualPath, ignoredAssets)) {
+      dbg("urlToStaticMapping: ignored (asset-base match)", { url, ...assetMatch });
       return {
         kind: "skipped",
         url,
-        reason: `matches --ignore-asset "${absoluteMapped.virtualPath}"`
+        reason: `matches --ignore-asset "${assetMatch.virtualPath}"`
       };
     }
-    if (!existsSync(absoluteMapped.localPath)) {
+    if (!existsSync(assetMatch.localPath)) {
       console.warn(
         `[html] Warning: asset-base mapped path does not exist\n` +
           `         url     : ${url}\n` +
-          `         virtual : ${absoluteMapped.virtualPath}\n` +
-          `         local   : ${absoluteMapped.localPath}`
+          `         virtual : ${assetMatch.virtualPath}\n` +
+          `         local   : ${assetMatch.localPath}`
       );
     }
     return {
       kind: "mapped",
-      mapping: `${absoluteMapped.virtualPath}:${absoluteMapped.localPath}`
+      mapping: `${assetMatch.virtualPath}:${assetMatch.localPath}`
     };
   }
 
+  // assetMatch.kind === "no-match" — proceed to local / external handling
+
   if (trimmed.startsWith("//")) {
-    return {
-      kind: "skipped",
-      url,
-      reason: "protocol-relative external URL"
-    };
+    return { kind: "skipped", url, reason: "protocol-relative external URL" };
   }
 
   if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(trimmed)) {
@@ -620,10 +651,7 @@ export function urlToStaticMapping(
   const virtualPath = cleanUrl.startsWith("/") ? posix.normalize(cleanUrl) : posix.resolve("/", posix.relative(htmlDir, localPath));
 
   if (shouldIgnoreVirtualPath(virtualPath, ignoredAssets)) {
-    dbg("urlToStaticMapping: ignored (ignore-asset match)", {
-      url,
-      virtualPath
-    });
+    dbg("urlToStaticMapping: ignored (ignore-asset match)", { url, virtualPath });
     return {
       kind: "skipped",
       url,
@@ -643,10 +671,7 @@ export function urlToStaticMapping(
   return { kind: "mapped", mapping: `${virtualPath}:${localPath}` };
 }
 
-export function parseStaticMapping(mapping: string): {
-  virtual: string;
-  local: string;
-} {
+export function parseStaticMapping(mapping: string): { virtual: string; local: string } {
   if (!mapping.startsWith("/")) {
     throw new Error(`Invalid --static mapping: "${mapping}"\nExpected format: /virtual/path:/local/path`);
   }
@@ -830,7 +855,7 @@ function buildProgram(): Command {
         "  • --debug sets --log-level to debug automatically.",
         "  • --preview and --mode preview are equivalent.",
         "  • In preview mode Vivliostyle serves everything via its own Vite server.",
-        "  • In build mode an Express server is started to serve assets.",
+        "  • In build mode a Vite server is started to serve assets.",
         "  • --asset-base localBase is also a fallback root for CSS-referenced assets."
       ].join("\n")
     );
@@ -862,6 +887,39 @@ export function parseArgs(argv: string[]): {
 }
 
 // ---------------------------------------------------------------------------
+// Build runner helper
+// ---------------------------------------------------------------------------
+
+type BuildRunParams = {
+  cwd: string;
+  input: string;
+  outputAbs: string;
+  format: OutputFormat;
+  metaFields: Partial<Record<string, string>>;
+  logLevel: LogLevel;
+  debug: boolean;
+  extraConfig: Record<string, unknown>;
+};
+
+async function runBuild(params: BuildRunParams, dbg: Dbg): Promise<void> {
+  const { cwd, input, outputAbs, format, metaFields, logLevel, debug, extraConfig } = params;
+
+  const config: BuildConfig = {
+    cwd,
+    input,
+    output: [{ path: outputAbs, format }],
+    ...metaFields,
+    logLevel,
+    ...(debug ? { debug: true } : {}),
+    ...extraConfig
+  };
+
+  dbg("final BuildConfig", config);
+  await build(config);
+  console.log(`✓ Document created: ${outputAbs}`);
+}
+
+// ---------------------------------------------------------------------------
 // Core execute
 // ---------------------------------------------------------------------------
 
@@ -879,9 +937,7 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
   if (!existsSync(inputAbs)) throw new Error(`Input file does not exist: ${inputAbs}`);
 
   const cwd = options.cwd ? resolve(options.cwd) : dirname(inputAbs);
-  if (!existsSync(cwd)) {
-    throw new Error(`Working directory does not exist: ${cwd}`);
-  }
+  if (!existsSync(cwd)) throw new Error(`Working directory does not exist: ${cwd}`);
   dbg("cwd", cwd);
 
   const outputAbs = resolve(options.output);
@@ -977,50 +1033,37 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
 
   // ── BUILD mode ─────────────────────────────────────────────────────────────
   if (mode === "build") {
-    let vivliostyleInput = inputAbs;
-    let htmlCleanup = (): void => undefined;
+    const buildParams: BuildRunParams = {
+      cwd,
+      input: inputAbs,
+      outputAbs,
+      format,
+      metaFields,
+      logLevel,
+      debug: !!options.debug,
+      extraConfig
+    };
 
     if (hasStatic || assetBases.length > 0) {
       const server = await startStaticServer(staticMap, assetBases, null, dbg);
+      const htmlResource = { cleanup: (): void => undefined };
 
       try {
         if (htmlMode) {
-          ({ vivliostyleInput, cleanup: htmlCleanup } = prepareInputHtmlForBuild(inputAbs, assetBases, staticMap, server.baseUrl, dbg));
+          const prepared = prepareInputHtmlForBuild(inputAbs, assetBases, staticMap, server.baseUrl, dbg);
+          htmlResource.cleanup = prepared.cleanup;
+          buildParams.input = prepared.vivliostyleInput;
         }
 
-        dbg("vivliostyleInput (final)", vivliostyleInput);
-
-        const config: BuildConfig = {
-          cwd,
-          input: vivliostyleInput,
-          output: [{ path: outputAbs, format }],
-          ...metaFields,
-          logLevel,
-          ...(options.debug ? { debug: true } : {}),
-          ...extraConfig
-        };
-        dbg("final BuildConfig", config);
-        await build(config);
-        console.log(`✓ Document created: ${outputAbs}`);
+        dbg("vivliostyleInput (final)", buildParams.input);
+        await runBuild(buildParams, dbg);
       } finally {
-        htmlCleanup();
-        server.close();
+        htmlResource.cleanup();
+        await server.close();
       }
     } else {
-      dbg("vivliostyleInput (final)", vivliostyleInput);
-
-      const config: BuildConfig = {
-        cwd,
-        input: vivliostyleInput,
-        output: [{ path: outputAbs, format }],
-        ...metaFields,
-        logLevel,
-        ...(options.debug ? { debug: true } : {}),
-        ...extraConfig
-      };
-      dbg("final BuildConfig", config);
-      await build(config);
-      console.log(`✓ Document created: ${outputAbs}`);
+      dbg("vivliostyleInput (final)", buildParams.input);
+      await runBuild(buildParams, dbg);
     }
 
     // ── PREVIEW mode ───────────────────────────────────────────────────────────

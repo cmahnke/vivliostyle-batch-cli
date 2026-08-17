@@ -1,3 +1,8 @@
+// test/vivliostyle-cli.test.ts
+
+// Copyright (c) 2026 Christian Mahnke
+// Licensed under the MIT License.
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,14 +16,25 @@ vi.mock("@vivliostyle/cli", () => ({
   preview: previewMock
 }));
 
+// Mock vite so no real server is started during tests.
+// createServer returns a minimal ViteDevServer-shaped object.
+vi.mock("vite", () => ({
+  createServer: vi.fn(async () => ({
+    middlewares: {
+      use: vi.fn()
+    },
+    httpServer: {
+      address: () => ({ port: 19876 })
+    },
+    listen: vi.fn(async () => {}),
+    close: vi.fn(async () => {})
+  }))
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Re-imports the module fresh on every test (vi.resetModules() in afterEach
- * ensures the previous import is discarded) and runs the given argv.
- */
 async function runArgs(argv: string[]): Promise<void> {
   const { parseArgs, execute } = await import("../src/vivliostyle-cli");
   const parsed = parseArgs(["node", "script", ...argv]);
@@ -208,17 +224,14 @@ describe("vivliostyle-cli", () => {
     await runArgs(["--input", inputFile]);
 
     expect(buildMock).toHaveBeenCalledTimes(1);
-    // No warnings about non-HTML input
     const warnCalls = warnSpy.mock.calls.map((c) => String(c[0]));
     expect(warnCalls.some((w) => w.includes("no effect"))).toBe(false);
   });
 
   it("warns when --asset-base is used with non-HTML input", async () => {
-    // Use a .json file which won't be treated as HTML
     const inputFile = join(tempDir, "pub.json");
     writeFileSync(inputFile, "{}", "utf-8");
 
-    // build() will be called but will succeed (mock)
     await runArgs(["--input", inputFile, "--asset-base", `http://cdn.example.com/=${tempDir}`]);
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("--asset-base has no effect"));
@@ -336,17 +349,29 @@ describe("vivliostyle-cli", () => {
       { urlBase: "https://cdn.example.com/", localBase: "/local/cdn" }
     ]);
 
-    expect(result).not.toBeNull();
-    expect(result!.virtualPath).toBe("/css/foo.css");
-    expect(result!.localPath).toBe(resolve("/local/cdn", "css/foo.css"));
+    // Result is now a discriminated union, not nullable
+    expect(result.kind).toBe("mapped");
+    if (result.kind !== "mapped") throw new Error("unreachable");
+    expect(result.virtualPath).toBe("/css/foo.css");
+    expect(result.localPath).toBe(resolve("/local/cdn", "css/foo.css"));
   });
 
-  it("mapAbsoluteUrlToLocal returns null for non-matching URLs", async () => {
+  it("mapAbsoluteUrlToLocal returns no-match for non-matching URLs", async () => {
     const { mapAbsoluteUrlToLocal } = await import("../src/vivliostyle-cli");
 
-    expect(
-      mapAbsoluteUrlToLocal("https://other.example.com/css/foo.css", [{ urlBase: "https://cdn.example.com/", localBase: "/local/cdn" }])
-    ).toBeNull();
+    const result = mapAbsoluteUrlToLocal("https://other.example.com/css/foo.css", [
+      { urlBase: "https://cdn.example.com/", localBase: "/local/cdn" }
+    ]);
+
+    expect(result.kind).toBe("no-match");
+  });
+
+  it("mapAbsoluteUrlToLocal returns root-only when URL has no sub-path", async () => {
+    const { mapAbsoluteUrlToLocal } = await import("../src/vivliostyle-cli");
+
+    const result = mapAbsoluteUrlToLocal("https://cdn.example.com/", [{ urlBase: "https://cdn.example.com/", localBase: "/local/cdn" }]);
+
+    expect(result.kind).toBe("root-only");
   });
 
   it("mapAbsoluteUrlToLocal strips query and fragment", async () => {
@@ -356,7 +381,9 @@ describe("vivliostyle-cli", () => {
       { urlBase: "https://cdn.example.com/", localBase: "/local/cdn" }
     ]);
 
-    expect(result!.virtualPath).toBe("/css/foo.css");
+    expect(result.kind).toBe("mapped");
+    if (result.kind !== "mapped") throw new Error("unreachable");
+    expect(result.virtualPath).toBe("/css/foo.css");
   });
 
   // ---------------------------------------------------------------------------
@@ -386,9 +413,6 @@ describe("vivliostyle-cli", () => {
 
   it("parseStaticMapping throws when virtual path does not start with /", async () => {
     const { parseStaticMapping } = await import("../src/vivliostyle-cli");
-    // "css:/dist/css" has no slash before the colon so parseStaticMapping
-    // detects it as a malformed mapping before reaching the starts-with-/
-    // check — the error message reflects the format validation.
     expect(() => parseStaticMapping("css:/dist/css")).toThrow("Invalid --static mapping");
   });
 
@@ -488,8 +512,6 @@ describe("vivliostyle-cli", () => {
 
     const result = rewriteAbsoluteUrls(html, [{ urlBase: "https://cdn.example.com/", localBase: "/local/cdn" }]);
 
-    // No match — should be unchanged (JSDOM may normalise whitespace so check
-    // the attribute value rather than the full string)
     expect(result).toContain("https://other.example.com/css/foo.css");
   });
 
@@ -541,6 +563,25 @@ describe("vivliostyle-cli", () => {
     expect((result as { kind: "skipped"; reason: string }).reason).toContain("external URL");
   });
 
+  it("urlToStaticMapping skips root-only asset-base URLs with a clear reason", async () => {
+    const { urlToStaticMapping } = await import("../src/vivliostyle-cli");
+
+    // URL exactly equals the urlBase — no sub-path to map
+    const result = urlToStaticMapping(
+      "https://cdn.example.com/",
+      tempDir,
+      [{ urlBase: "https://cdn.example.com/", localBase: tempDir }],
+      new Set(),
+      () => {}
+    );
+
+    expect(result.kind).toBe("skipped");
+    const reason = (result as { kind: "skipped"; reason: string }).reason;
+    // Must not fall through to the "add --asset-base" message
+    expect(reason).not.toContain("add --asset-base");
+    expect(reason).toContain("root URL");
+  });
+
   it("urlToStaticMapping maps an absolute URL via asset-base", async () => {
     const { urlToStaticMapping } = await import("../src/vivliostyle-cli");
 
@@ -572,9 +613,6 @@ describe("vivliostyle-cli", () => {
   it("urlToStaticMapping maps a root-relative URL to a local file", async () => {
     const { urlToStaticMapping } = await import("../src/vivliostyle-cli");
 
-    // Use a relative URL (./app.js) so that resolve(htmlDir, url) produces a
-    // path inside tempDir. Root-relative URLs (/app.js) are resolved against
-    // the filesystem root, not htmlDir, so tempDir would not appear in the result.
     writeFileSync(join(tempDir, "app.js"), "// js", "utf-8");
 
     const result = urlToStaticMapping("./app.js", tempDir, [], new Set(), () => {});
@@ -602,7 +640,6 @@ describe("vivliostyle-cli", () => {
     expect(config.openViewer).toBe(true);
     expect(config.enableStaticServe).toBe(true);
     expect(config.singleDoc).toBe(true);
-    // input is the absolute path to the file (Vivliostyle resolves it)
     expect(config.input).toBe(resolve(inputFile));
   });
 
@@ -637,7 +674,6 @@ describe("vivliostyle-cli", () => {
     expect(previewMock).toHaveBeenCalledTimes(1);
     const config = previewMock.mock.calls[0][0];
 
-    // Static mounts go into configData[0].static, not top-level
     expect(config.configData).toBeDefined();
     expect(config.configData[0].static).toBeDefined();
     expect(config.configData[0].static["/css/site.css"]).toBe(resolve(tempDir, "css/site.css"));
@@ -672,9 +708,7 @@ describe("vivliostyle-cli", () => {
 
     const config = previewMock.mock.calls[0][0];
     expect(config.configData[0].static).toBeDefined();
-    // The explicit file mapping from the HTML
     expect(config.configData[0].static["/css/site.css"]).toBe(resolve(tempDir, "css/site.css"));
-    // The fallback root mount from the assetBase
     expect(config.configData[0].static["/"]).toBe(resolve(tempDir));
   });
 
@@ -702,16 +736,8 @@ describe("vivliostyle-cli", () => {
 
     expect(buildMock).toHaveBeenCalledTimes(1);
     const config = buildMock.mock.calls[0][0];
-
-    // livereload.js is ignored so it must not appear in the log output.
-    // The build input is the original file (no absolute URLs to rewrite,
-    // and relative paths in the HTML are not rewritten to server URLs
-    // because prepareInputHtmlForBuild only changes things when there is
-    // an actual textual difference to make).
     expect(config.input).toBe(resolve(inputFile));
 
-    // Verify the ignored asset was actually skipped by checking the console
-    // log output captured by logSpy.
     const logs = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logs).toContain("livereload.js");
     expect(logs).toContain("Skipped");
@@ -744,13 +770,11 @@ describe("vivliostyle-cli", () => {
     expect(htmlPath).not.toBe(inputFile);
     expect(htmlPath).toContain("_vivliostyle_preview_page.html");
 
-    // The written file should have the rewritten href
     const { readFileSync } = await import("node:fs");
     const written = readFileSync(htmlPath, "utf-8");
     expect(written).toContain('href="/css/foo.css"');
     expect(written).not.toContain("https://cdn.example.com");
 
-    // extraStatic should contain the assetBase root
     expect(extraStatic["/"]).toBe(resolve("/local/cdn"));
 
     cleanup();
@@ -765,6 +789,6 @@ describe("vivliostyle-cli", () => {
     const { htmlPath, cleanup } = buildPreviewHtml(inputFile, [], () => {});
 
     expect(htmlPath).toBe(inputFile);
-    cleanup(); // no-op, should not throw
+    cleanup();
   });
 });
