@@ -18,7 +18,7 @@
     "lint": "npx tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "@vivliostyle/cli": "^11.1.0",
+    "@vivliostyle/cli": "^11.2.0",
     "commander": "^15.0.0",
     "express": "^5.2.1",
     "jsdom": "^30.0.1",
