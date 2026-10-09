@@ -93,13 +93,16 @@ describe("render fixtures (mocked, offline)", () => {
     // magic \0asm + version 1
     expect([...bytes.subarray(0, 4)]).toEqual([0, 0x61, 0x73, 0x6d]);
     expect(bytes.readUInt32LE(4)).toBe(1);
-    // Instantiates and paints a deterministic gradient (row 1 differs from 0).
+    // Instantiates and paints a VISIBLE gradient: R sweeps 0..252 per column
+    // (x*36), G steps 64 per row — a low-amplitude tile would render as one
+    // flat color block in the PDF.
     const { instance } = await WebAssembly.instantiate(bytes, {});
     const exports = instance.exports as { memory: WebAssembly.Memory; render: (w: number, h: number) => void };
     exports.render(8, 2);
     const mem = new Uint8Array(exports.memory.buffer, 0, 8 * 2 * 4);
     expect(mem[0]).toBe(0);
-    expect(mem[(8 * 1 + 4) * 4]).toBe(8); // R of row 1, col 4
+    expect(mem[(8 * 1 + 4) * 4]).toBe(144); // R of row 1, col 4 (4*36)
+    expect(mem[(8 * 1 + 4) * 4 + 1]).toBe(64); // G of row 1 (1*64)
     expect(mem[(8 * 1 + 4) * 4 + 3]).toBe(255);
   });
 
