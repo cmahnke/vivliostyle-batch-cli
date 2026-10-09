@@ -237,6 +237,11 @@ export async function startStaticServer(options: StaticServerOptions = {}, port 
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
     const urlPath = decodeRequestPath(req);
     const query = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+    // Every request the page makes transits here: log it (path + status) so
+    // render problems become traceable from the per-page logs.
+    res.on("finish", () => {
+      log(`${urlPath} ${res.statusCode}`);
+    });
 
     if (handleSettle(urlPath, query, res)) return;
 

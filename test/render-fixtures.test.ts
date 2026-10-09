@@ -168,6 +168,11 @@ describe("render hardening (chrome + pre-print + settle)", () => {
     expect(script).toContain("scrollIntoView");
     expect(script).toContain("__vivResize");
     expect(script).toContain("webgpu");
+    // Collapsed custom-element scenes get a box from the nearest sized
+    // ancestor (A-Frame's display:block stylesheet does not reach the
+    // paginated tree).
+    expect(script).toContain("a-scene");
+    expect(script).toContain('style.display = "block"');
     expect(
       summarizeCapabilities([
         {
@@ -241,6 +246,12 @@ describe("render hardening (chrome + pre-print + settle)", () => {
     expect(script).toContain("paintedCanvases");
     expect(script).toContain("painted=");
     expect(script).toContain('signal("ready")');
+    // WebGL capture fix: force preserveDrawingBuffer on every context the
+    // page creates (print-to-PDF reads the cleared buffer otherwise).
+    expect(script).toContain("preserveDrawingBuffer = true");
+    // Lifecycle fix: re-dispatch the events Vivliostyle only sends to window.
+    expect(script).toContain('dispatchEvent(new Event("DOMContentLoaded"))');
+    expect(script).toContain('dispatchEvent(new Event("load"))');
   });
 
   it("static server falls through a stale exact entry to a serving prefix", async () => {

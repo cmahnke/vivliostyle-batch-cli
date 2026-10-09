@@ -195,6 +195,37 @@ export function buildRuntimeScript(options: RuntimeScriptOptions): string {
 var ORIGIN=${JSON.stringify(origin)},BASE=${JSON.stringify(documentBaseUrl)};
 var QUIET=${gate?.quietMs ?? 400},DEADLINE=${gate?.deadlineMs ?? 10000},FRAME_GRACE=3000;
 var pending=0,frames=0,last=0,mutations=0,done=false,longtasks=0;
+// Force preserveDrawingBuffer on every WebGL context the page creates:
+// print-to-PDF otherwise captures the cleared drawing buffer and WebGL
+// content ships empty, even though the browser shows it composited.
+try {
+  var origGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+    if (typeof type === "string" && /^webgl/.test(type)) {
+      attrs = Object.assign({}, attrs || {});
+      attrs.preserveDrawingBuffer = true;
+      return origGetContext.call(this, type, attrs);
+    }
+    return origGetContext.call(this, type, attrs);
+  };
+} catch (e) {}
+// Vivliostyle re-dispatches DOMContentLoaded on the window only, so scripts
+// waiting for it on the document (framework bootstraps, print scripts, asset
+// bootstraps) never run. Re-dispatch the lifecycle events properly once
+// loading finished.
+try {
+  var redeliver = function () {
+    setTimeout(function () {
+      try {
+        document.dispatchEvent(new Event("DOMContentLoaded"));
+        window.dispatchEvent(new Event("DOMContentLoaded"));
+        window.dispatchEvent(new Event("load"));
+      } catch (e) {}
+    }, 0);
+  };
+  if (document.readyState === "complete") redeliver();
+  else window.addEventListener("load", redeliver, { once: true });
+} catch (e) {}
 var state=window.__vivSettle={done:false,reason:null,at:0,pending:0,frames:0,mutations:0,dpr:window.devicePixelRatio};
 
 // Root-relative URLs resolve against the site root, document-relative ones
@@ -258,13 +289,19 @@ if(of){window.fetch=function(input,init){
     else if(input&&typeof input.url==="string")input=new Request(fix(input.url),input);
   }catch(e){}
   pending++;last=performance.now();
-  return of.call(this,input,init).then(function(v){pending--;last=performance.now();return v;},
-    function(e){pending--;last=performance.now();throw e;});};}
+  var furl=(typeof input==="string"?input:input&&input.url?input.url:"?");
+  return of.call(this,input,init).then(function(v){pending--;last=performance.now();
+    try{console.debug("[viv-fetch]",furl,"->",v.status);}catch(e){}
+    return v;},
+    function(e){pending--;last=performance.now();
+      try{console.debug("[viv-fetch]",furl,"-> FAILED",String(e).slice(0,80));}catch(e2){}
+      throw e;});};}
 var XHR=window.XMLHttpRequest;
 if(XHR){var open=XHR.prototype.open,send=XHR.prototype.send;
-  XHR.prototype.open=function(m,u){this.__vscounted=true;return open.apply(this,arguments);};
+  XHR.prototype.open=function(m,u){this.__vscounted=true;this.__vsurl=fix(u);return open.apply(this,arguments);};
   XHR.prototype.send=function(){if(this.__vscounted&&!this.__vsdone){this.__vsdone=true;pending++;last=performance.now();
-    this.addEventListener("loadend",function(){pending--;last=performance.now();});}
+    this.addEventListener("loadend",function(){pending--;last=performance.now();
+      try{console.debug("[viv-xhr]",this.__vsurl,"->",this.status);}catch(e){}});}
     return send.apply(this,arguments);};}
 // WebAssembly compilation runs after its fetch resolves, so the fetch wrapper
 // alone would report idle mid-compile. Hold pending through it.

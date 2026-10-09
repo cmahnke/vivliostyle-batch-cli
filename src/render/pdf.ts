@@ -98,9 +98,13 @@ export type FrameRenderCapability = {
   webgpu: boolean;
   canvasCount: number;
   canvases: string;
-  iframeCount: number;
+  iframeCount: number | null;
   dpr: number;
   resized: string | null;
+  /** A-Frame scenes materialized into 2D overlay canvases for print. */
+  materialized?: number;
+  /** Scene-graph state at print time (debug aid). */
+  sceneDiag?: string | null;
 };
 
 /**
@@ -130,8 +134,179 @@ export function buildFrameProbeScript(factor: number): string {
     try { window.__vivResize(factor); } catch(e){ resized = "error:"+String(e); }
   }
   try { window.dispatchEvent(new Event("resize")); } catch(e){}
+  // Bridge the viewer's broken page lifecycle. A-Frame scenes can end up
+  // loaded-but-never-playing in the paginated tree (render loop, default
+  // lights and asset loads all missed their window) while the same page
+  // renders fine in a real browser. Start the scene's own loop and give
+  // collapsed scenes a box (their display:block stylesheet does not reach
+  // the re-parented tree, so unsized unknown elements stay inline).
+  try {
+    var bridgeScenes = document.querySelectorAll("a-scene");
+    for (var bi = 0; bi < bridgeScenes.length; bi++) {
+      var bridgeScene = bridgeScenes[bi];
+      if (!bridgeScene.isPlaying && typeof bridgeScene.play === "function") {
+        try { bridgeScene.play(); } catch (e) {}
+      }
+      if (bridgeScene.clientWidth === 0 || bridgeScene.clientHeight === 0) {
+        var sized = bridgeScene.parentElement;
+        while (sized && (sized.clientWidth === 0 || sized.clientHeight === 0)) sized = sized.parentElement;
+        if (sized) {
+          bridgeScene.style.display = "block";
+          bridgeScene.style.width = sized.clientWidth + "px";
+          bridgeScene.style.height = sized.clientHeight + "px";
+          if (typeof bridgeScene.resize === "function") bridgeScene.resize();
+        }
+      }
+    }
+    await nextFrame();
+  } catch(e){}
+  // Give each scene what it needs to render like the browser does, then
+  // materialize its WebGL canvas into a 2D overlay (2D canvases always
+  // survive print-to-PDF): re-kick unloaded assets, swap unlit materials for
+  // flat ones when no lights exist, render, and blit synchronously.
+  var materialized = 0;
+  var sceneDiag = "";
+  try {
+    var scenes = document.querySelectorAll("a-scene");
+    for (var si = 0; si < scenes.length; si++) {
+      var sceneEl = scenes[si];
+      // The viewer clones scenes into its page boxes; only the VISIBLE one
+      // (with a box) is what the PDF will show. The hidden original's render
+      // would materialize nothing.
+      if (!(sceneEl.clientWidth > 0 && sceneEl.clientHeight > 0)) continue;
+      if (!sceneEl.renderer || !sceneEl.camera) continue;
+      try {
+        var gltfEl = sceneEl.querySelector("[gltf-model]");
+        if (gltfEl) {
+          var gmObj = gltfEl.object3D;
+          sceneDiag += " gmKids=" + gmObj.children.length + "/" + (gltfEl.components["gltf-model"] ? String(gltfEl.components["gltf-model"].model !== null) : "nocomp");
+        }
+        sceneDiag += " tree=" + sceneEl.object3D.children.map(function (c) { return c.type + (c.children ? ":" + c.children.length : ""); }).join("|").slice(0, 110);
+      } catch (e) {
+        sceneDiag += " diagErr " + String(e).slice(0, 50);
+      }
+      try {
+        var assetItems = sceneEl.querySelectorAll("a-asset-item");
+        var assetWaits = [];
+        for (var ai = 0; ai < assetItems.length; ai++) {
+          var assetEl = assetItems[ai];
+          if (assetEl.hasLoaded) continue;
+          assetWaits.push(
+            new Promise(function (resolve) {
+              var settled = false;
+              var finish = function () {
+                if (settled) return;
+                settled = true;
+                resolve();
+              };
+              assetEl.addEventListener("loaded", finish, { once: true });
+              assetEl.addEventListener("error", finish, { once: true });
+              setTimeout(finish, 8000);
+              var src = assetEl.getAttribute("src");
+              if (src) assetEl.setAttribute("src", src);
+            })
+          );
+        }
+        if (assetWaits.length > 0) {
+          await Promise.race([Promise.all(assetWaits), new Promise(function (r) { setTimeout(r, 9000); })]);
+        }
+      } catch (e) {}
+      try {
+        var lightsFound = 0;
+        sceneEl.object3D.traverse(function (n) { if (n.isLight) lightsFound++; });
+        if (lightsFound === 0) {
+          var basicCtor = null;
+          sceneEl.object3D.traverse(function (n) {
+            if (n.isMesh && n.material && n.material.isMeshBasicMaterial && basicCtor === null) basicCtor = n.material.constructor;
+          });
+          if (basicCtor) {
+            sceneEl.object3D.traverse(function (n) {
+              if (!n.isMesh || !n.material || n.material.isMeshBasicMaterial) return;
+              try {
+                var m = n.material;
+                var flat = new basicCtor({ color: m.color ? m.color.clone() : undefined });
+                flat.side = m.side;
+                flat.transparent = m.transparent;
+                flat.opacity = m.opacity;
+                if (m.map) flat.map = m.map;
+                n.material = flat;
+              } catch (e) {}
+            });
+          }
+        }
+      } catch(e){}
+      try {
+        sceneEl.renderer.render(sceneEl.object3D, sceneEl.camera);
+        var glCanvas = sceneEl.canvas;
+        if (!glCanvas || glCanvas.width === 0 || glCanvas.height === 0) continue;
+        var overlay = document.createElement("canvas");
+        overlay.setAttribute("data-viv-gl-overlay", "");
+        overlay.width = glCanvas.width;
+        overlay.height = glCanvas.height;
+        overlay.style.position = "absolute";
+        overlay.style.pointerEvents = "none";
+        overlay.style.width = glCanvas.clientWidth + "px";
+        overlay.style.height = glCanvas.clientHeight + "px";
+        var cr = glCanvas.getBoundingClientRect();
+        var pr = (glCanvas.offsetParent || document.body).getBoundingClientRect();
+        overlay.style.left = cr.left - pr.left + "px";
+        overlay.style.top = cr.top - pr.top + "px";
+        overlay.style.zIndex = "1";
+        (glCanvas.parentNode || document.body).appendChild(overlay);
+        overlay.getContext("2d").drawImage(glCanvas, 0, 0);
+        // Empty capture = the scene never initialized in this tree (its
+        // framework lifecycle was lost to the viewer's re-parenting). Replace
+        // it with a fresh copy: the custom-element upgrade re-runs the full
+        // framework lifecycle (assets, lights, render loop) in the now-sized
+        // tree.
+        var empty = true;
+        try {
+          var dd = overlay.getContext("2d").getImageData(0, 0, overlay.width, overlay.height).data;
+          for (var di = 3; di < dd.length; di += 256) {
+            if (dd[di] > 0) {
+              empty = false;
+              break;
+            }
+          }
+        } catch (e) {
+          empty = false;
+        }
+        if (empty) {
+          var fresh = sceneEl.cloneNode(true);
+          sceneEl.parentNode.replaceChild(fresh, sceneEl);
+          sceneEl = fresh;
+          // Enough time for the fresh scene's asset fetches (a real GLB over
+          // the network) + first renders.
+          await new Promise(function (r) {
+            setTimeout(r, 8000);
+          });
+          if (!sceneEl.renderer || !sceneEl.camera) continue;
+        }
+        sceneEl.renderer.render(sceneEl.object3D, sceneEl.camera);
+        var gl2 = sceneEl.canvas;
+        if (!gl2 || gl2.width === 0 || gl2.height === 0) continue;
+        overlay.width = gl2.width;
+        overlay.height = gl2.height;
+        overlay.getContext("2d").drawImage(gl2, 0, 0);
+        materialized++;
+        try {
+          var od = overlay.getContext("2d").getImageData(0, 0, overlay.width, overlay.height).data;
+          var alphaN = 0;
+          var orangeN = 0;
+          for (var oi = 3; oi < od.length; oi += 16) {
+            if (od[oi] > 0) alphaN++;
+            if (od[oi - 3] > 150 && od[oi - 2] > 60 && od[oi - 2] < 200 && od[oi - 1] < 110 && od[oi - 3] > od[oi - 2] + 40) orangeN++;
+          }
+          glSample = [alphaN, orangeN];
+        } catch (e) {}
+      } catch (e) {}
+    }
+  } catch(e){}
   // Hooks like echarts re-init dispose the canvas synchronously; let layout
   // settle a frame before measuring so sizes reflect the repainted state.
+  // This also lets render loops refill their drawing buffers after the
+  // resize above — drawImage on a just-resized WebGL canvas would read the
+  // cleared buffer.
   try { await nextFrame(); } catch(e){}
   if (resized === null && factor > 1 && typeof window.__vivResize === "function") resized = canvasSizes();
   var webgl = false, webgl2 = false;
@@ -150,7 +325,9 @@ export function buildFrameProbeScript(factor: number): string {
     canvasCount: document.querySelectorAll("canvas").length, canvases: canvasSizes(),
     iframeCount: document.querySelectorAll("iframe").length,
     dpr: typeof window.devicePixelRatio === "number" ? window.devicePixelRatio : 1,
-    resized: resized
+    resized: resized,
+    materialized: materialized,
+    sceneDiag: sceneDiag
   };
 })(${JSON.stringify(factor)})`;
 }
@@ -158,7 +335,7 @@ export function buildFrameProbeScript(factor: number): string {
 /** Best-effort capability + HiDPI pass over every frame before `page.pdf()`. */
 export async function prepareForPrint(
   page: {
-    frames: () => Array<{ evaluate: (script: string) => Promise<unknown> }>;
+    frames: () => Array<{ url?: () => string; evaluate: (script: string) => Promise<unknown> }>;
   },
   options: { canvasScale?: number; settleMs?: number } = {}
 ): Promise<FrameRenderCapability[]> {
@@ -169,8 +346,9 @@ export async function prepareForPrint(
   for (const frame of page.frames()) {
     try {
       out.push((await frame.evaluate(script)) as FrameRenderCapability);
-    } catch {
+    } catch (err) {
       // Cross-origin embeds that refuse evaluation still print as pixels.
+      log.trace("frame probe failed", frame.url?.() ?? "(frame)", err instanceof Error ? err.message : String(err));
       continue;
     }
   }
@@ -183,12 +361,13 @@ export async function prepareForPrint(
 /** One-line summary for logs: capabilities per frame that owns content. */
 export function summarizeCapabilities(caps: FrameRenderCapability[]): string {
   return caps
-    .filter((c) => c.canvasCount > 0 || c.iframeCount > 0 || c.fixture !== null)
+    .filter((c) => c.canvasCount > 0 || (c.iframeCount ?? 0) > 0 || c.fixture !== null)
     .map(
       (c) =>
         `${c.fixture ?? c.url} canvases=[${c.canvases}] iframes=${c.iframeCount} ` +
         `webgl=${String(c.webgl)}/2=${String(c.webgl2)} webgpu=${String(c.webgpu)}` +
-        (c.resized !== null ? ` resized=[${c.resized}]` : "")
+        (c.resized !== null ? ` resized=[${c.resized}]` : "") +
+        (c.materialized ? ` materialized=${c.materialized} ${c.sceneDiag ?? ""}` : "")
     )
     .join(" | ");
 }
@@ -228,11 +407,16 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
 
     page.on("pageerror", (err: unknown) => log.warn(`[render] page error: ${err instanceof Error ? err.message : String(err)}`));
     // Viewer and page errors are the usual reason a render produces nothing.
+    // Debug/info console messages (fetch traces from the runtime script) are
+    // shown at debug level, so -d traces every page-side request.
+    const debugConsole = log.getLevel() <= log.levels.DEBUG;
     page.on("console", (message) => {
       const type = message.type();
-      if (type !== "error" && type !== "warn") return;
+      if (type !== "error" && type !== "warn" && !(debugConsole && (type === "debug" || type === "info"))) return;
       const where = message.location();
-      log.warn(`[render] console.${type}: ${message.text()}${where.url === "" ? "" : ` (${where.url})`}`);
+      log[debugConsole && type !== "error" && type !== "warn" ? "trace" : "warn"](
+        `[render] console.${type}: ${message.text()}${where.url === "" ? "" : ` (${where.url})`}`
+      );
     });
     page.on("requestfailed", (request) => {
       log.warn(`[render] request failed: ${request.url()} (${request.failure()?.errorText ?? "unknown"})`);
