@@ -115,6 +115,13 @@ describe("render fixtures (mocked, offline)", () => {
     expect(html).toContain("mocked wasm gradient 42");
     // A failed load must not swallow readiness (gate would hit the deadline).
     expect(html).toContain(".catch");
+    // Gradient tiling must wrap BOTH axes: the wasm tile is 8x4, the canvas
+    // 600x300 — without (y % H) rows 4+ read past the painted region and
+    // render as a black rectangle.
+    expect(html).toContain("(y % WASM_H)");
+    expect(html).toContain("(x % WASM_W)");
+    // Painted-content self-check: pixels read back, not just canvas size.
+    expect(html).toContain("__vivPixelCheck");
   });
 
   it("three.js fixture uses an importmap to node_modules (ESM, no vendored copy)", () => {

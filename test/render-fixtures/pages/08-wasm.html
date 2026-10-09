@@ -25,19 +25,23 @@
     <script>
       window.__vivFixture = "wasm";
       window.__vivReady = false;
+      var WASM_W = 8,
+        WASM_H = 4;
       var c = document.getElementById("stage");
       var ctx = c.getContext("2d");
 
-      function paint(mem, w, h, factor) {
+      function paint(mem, factor) {
         factor = factor || 1;
         c.width = Math.ceil(600 * factor);
         c.height = Math.ceil(300 * factor);
         ctx.setTransform(factor, 0, 0, factor, 0, 0);
         var img = ctx.createImageData(600, 300);
         var data = img.data;
+        // Tile the WxH gradient over the whole canvas: both axes wrap, so
+        // every source read stays inside the region render() painted.
         for (var y = 0; y < 300; y++) {
           for (var x = 0; x < 600; x++) {
-            var src = (y * w + (x % w)) * 4;
+            var src = ((y % WASM_H) * WASM_W + (x % WASM_W)) * 4;
             var dst = (y * 600 + x) * 4;
             data[dst] = mem[src];
             data[dst + 1] = mem[src + 1];
@@ -51,6 +55,14 @@
         ctx.fillStyle = "#111";
         ctx.font = "20px serif";
         ctx.fillText("mocked wasm gradient 42 @x" + factor, 12, 28);
+        // Read back two samples so verification can assert painted content
+        // instead of trusting canvas dimensions.
+        var s0 = ctx.getImageData(10, 60, 1, 1).data;
+        var s1 = ctx.getImageData(300, 150, 1, 1).data;
+        window.__vivPixelCheck = {
+          topLeft: [s0[0], s0[1], s0[2], s0[3]],
+          middle: [s1[0], s1[1], s1[2], s1[3]]
+        };
       }
 
       // Same pattern as the real bundle (blog-visualisation): wasm via
@@ -70,8 +82,8 @@
             });
         })
         .then(function (result) {
-          var mem = new Uint8Array(result.instance.exports.memory.buffer, 0, 8 * 4 * 4);
-          result.instance.exports.render(8, 4);
+          var mem = new Uint8Array(result.instance.exports.memory.buffer, 0, WASM_W * WASM_H * 4);
+          result.instance.exports.render(WASM_W, WASM_H);
           wasmBytes = mem;
           // Slow tail that the gate MUST observe: a ~350ms busy loop is a
           // real long task (>50ms), reported by the longtask observer. A
@@ -90,7 +102,7 @@
         })
         .then(function () {
           if (wasmBytes) {
-            paint(wasmBytes, 8, 4, 1);
+            paint(wasmBytes, 1);
             document.getElementById("wasm-status").textContent = "mocked wasm painted 42";
             window.__vivWasmStatus = "painted";
           } else {
@@ -108,7 +120,7 @@
         });
 
       window.__vivResize = function (factor) {
-        if (wasmBytes) paint(wasmBytes, 8, 4, factor);
+        if (wasmBytes) paint(wasmBytes, factor);
       };
     </script>
   </body>
