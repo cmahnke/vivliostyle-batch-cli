@@ -86,7 +86,9 @@ async function main(): Promise<void> {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     manifest = (await response.json()) as Manifest;
   } catch {
-    app.innerHTML = `<header><h1>Render fixtures</h1><p>Could not load <code>fixtures/manifest.json</code>. Run the fixture renders first.</p></header>`;
+    app.innerHTML =
+      `<header><h1>Render fixtures</h1>` +
+      `<p>Could not load <code>fixtures/manifest.json</code>. Run the fixture renders first.</p></header>`;
     return;
   }
   const runLink =

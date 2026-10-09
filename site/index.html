@@ -3,10 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>vivliostyle-batch-cli — render fixtures</title>
+    <title>vivliostyle-batch-cli — HTML to PDF in the real browser</title>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="app">
+      <nav aria-label="Site">
+        <strong>vivliostyle-batch-cli</strong>
+        <a href="./" aria-current="page">Home</a>
+        <a href="./fixtures.html">Fixtures</a>
+        <a href="https://github.com/cmahnke/vivliostyle-batch-cli">Repo</a>
+        <a href="https://www.npmjs.com/package/@projektemacher/vivliostyle-batch-cli">npm</a>
+      </nav>
+      <header>
+        <h1>vivliostyle-batch-cli</h1>
+        <p>
+          Batch-oriented HTML-to-PDF rendering on top of Vivliostyle and headless Chrome — canvas charts, WebGL scenes and cross-origin
+          iframes end up in the PDF, sharp past 96dpi.
+        </p>
+        <pre><code>npm install -g @projektemacher/vivliostyle-batch-cli
+vivliostyle-cli -i index.html -o output.pdf</code></pre>
+        <p><a href="./fixtures.html">See the render fixtures →</a></p>
+      </header>
+      <main>
+        <article id="manual">
+          <p>Loading manual…</p>
+        </article>
+      </main>
+    </div>
+    <script type="module" src="/src/landing.ts"></script>
   </body>
 </html>

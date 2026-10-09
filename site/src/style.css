@@ -1,4 +1,4 @@
-/* Showcase styles: one card per fixture, input iframe next to output PDF. */
+/* Shared styles: landing manual, top menu, fixture cards. */
 
 :root {
   color-scheme: light;
@@ -11,11 +11,43 @@ body {
   color: #222;
 }
 
+nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+nav strong {
+  margin-right: auto;
+}
+
 header,
 main {
   max-width: 1200px;
   margin: 0 auto;
   padding: 1rem;
+}
+
+article table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+article th,
+article td {
+  border: 1px solid #ddd;
+  padding: 0.3em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+
+article pre {
+  overflow-x: auto;
 }
 
 .badge {

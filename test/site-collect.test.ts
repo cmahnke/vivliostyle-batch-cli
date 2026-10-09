@@ -66,6 +66,26 @@ describe("showcase input rewriting", () => {
   });
 });
 
+describe("showcase top menu", () => {
+  it("landing and fixtures pages link to each other with an active marker", async () => {
+    const { readFileSync } = await import("node:fs");
+    const landing = readFileSync(join(REPO_ROOT, "site/index.html"), "utf-8");
+    const fixtures = readFileSync(join(REPO_ROOT, "site/fixtures.html"), "utf-8");
+    for (const [name, html] of [
+      ["landing", landing],
+      ["fixtures", fixtures]
+    ] as const) {
+      expect(html, `${name} has a nav`).toContain("<nav");
+      expect(html, `${name} links home`).toContain('href="./"');
+      expect(html, `${name} links fixtures`).toContain('href="./fixtures.html"');
+      expect(html.match(/aria-current="page"/g) ?? [], `${name} marks one active entry`).toHaveLength(1);
+    }
+    expect(landing).toContain('href="./fixtures.html"');
+    expect(fixtures).toContain('src="/src/fixtures.ts"');
+    expect(landing).toContain('src="/src/landing.ts"');
+  });
+});
+
 describe("showcase log parsing", () => {
   const waitLine =
     `[wait] layout gate settled after 3ms {"reason":"ready","ms":1140,"pending":0,"frames":0,` +

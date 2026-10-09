@@ -151,10 +151,12 @@ false`) and returns the viewer URL; build renders all pages to PDF.
 
 ## 11. Showcase site (GitHub Pages)
 
-- `site/` is a Vite app: one card per fixture with the input page in a
-  sandboxed iframe (`allow-scripts allow-same-origin`, no top navigation),
-  the rendered PDF embedded, plus metrics (bytes, settle reason, canvas
-  sizes, DPR, GPU flags) and the render-log excerpt.
+- `site/` is a Vite app with a top menu (Home, Fixtures, Repo, npm): the
+  landing page renders the README (single source of truth, inlined at build
+  via `?raw` and parsed with `marked`), and one card per fixture shows the
+  input page in a sandboxed iframe (`allow-scripts allow-same-origin`, no top
+  navigation), the rendered PDF embedded, plus metrics (bytes, settle reason,
+  canvas sizes, DPR, GPU flags) and the render-log excerpt.
 - `site/collect-manifest.mjs` stages `site/public/fixtures/` (generated,
   gitignored): input copies with absolute `/vendor/` URLs rewritten to
   relative, vendor builds + OSD images copied from `node_modules`, tiles
