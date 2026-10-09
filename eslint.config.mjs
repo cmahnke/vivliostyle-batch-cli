@@ -16,6 +16,10 @@ export default [
     }
   },
   {
-    ignores: ["dist/", "eslint.config.mjs", "docs/", "pdf/"]
+    files: ["site/**/*.mjs"],
+    languageOptions: { globals: globals.node }
+  },
+  {
+    ignores: ["dist/", "dist-site/", "eslint.config.mjs", "docs/", "pdf/", "site/public/"]
   }
 ];

@@ -1611,9 +1611,12 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
       viewerFilePath: join(viewerLibDir, "index.html"),
       log: (message) => log.info(message),
       onSettled: ({ reason, waitedMs, detail }) => {
+        // Detail is logged in both branches: the deadline case is exactly
+        // when canvas sizes and readiness matter most (e.g. slow WebGL).
         const line = `[wait] layout gate ${reason} after ${waitedMs}ms`;
-        if (reason === "settled") log.info(detail === undefined ? line : `${line} ${JSON.stringify(detail)}`);
-        else log.warn(`${line} — content may be incomplete`);
+        const withDetail = detail === undefined ? line : `${line} ${JSON.stringify(detail)}`;
+        if (reason === "settled") log.info(withDetail);
+        else log.warn(`${withDetail} — content may be incomplete`);
       }
     });
 

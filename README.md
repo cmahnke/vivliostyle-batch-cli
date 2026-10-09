@@ -105,6 +105,7 @@ vivliostyle-cli -i index.html -o output.pdf -- --size A4 --viewer-param pixelRat
 - `--fetch-missing` HEADs every remote reference without a local file and drops the ones that are definitively gone (404/410), so retired embeds do not stall the build. A reference that resolves to a local file is never probed: the live site may have moved on while the local copy still has what the page needs.
 - Collapsed `<details>` elements are opened for the PDF. Vivliostyle loads the page's scripts itself and only re-dispatches `DOMContentLoaded` on the window, so the print scripts that expand collapsible content never run. The preview is left untouched.
 - Print media is active before the document loads, otherwise JS-driven containers are measured as `0x0` and charts stay empty.
+- Every push to `main` publishes a showcase page (GitHub Pages) with the synthetic fixtures from `test/render-fixtures/` next to the PDFs CI rendered from them: input iframe on the left, output PDF, settle reason and canvas sizes on the right. Build it locally with `npm run site:dev` (sample data) or render first and run `npm run site:collect && npm run site:build`.
 
 ### Converting a built website
 

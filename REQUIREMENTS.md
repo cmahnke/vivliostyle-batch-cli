@@ -148,3 +148,20 @@ false`) and returns the viewer URL; build renders all pages to PDF.
 - Fixture contract: deterministic, fixed print-safe container sizes,
   `break-inside: avoid`, `window.__vivReady/__vivFixture` set when painted,
   `window.__vivResize(factor)` where resolution-dependent.
+
+## 11. Showcase site (GitHub Pages)
+
+- `site/` is a Vite app: one card per fixture with the input page in a
+  sandboxed iframe (`allow-scripts allow-same-origin`, no top navigation),
+  the rendered PDF embedded, plus metrics (bytes, settle reason, canvas
+  sizes, DPR, GPU flags) and the render-log excerpt.
+- `site/collect-manifest.mjs` stages `site/public/fixtures/` (generated,
+  gitignored): input copies with absolute `/vendor/` URLs rewritten to
+  relative, vendor builds + OSD images copied from `node_modules`, tiles
+  copied from `test/`, and `manifest.json` parsed from render logs. Exits
+  non-zero when a marker or PDF is missing. `--sample` writes placeholder
+  entries for `npm run site:dev`.
+- CI (`render-fixtures` job) renders all fixtures to PDF, collects the
+  manifest, builds the site and uploads the Pages artifact; `deploy-site`
+  (push-gated) publishes it on every `main` push. PRs run the render checks
+  without deploying.
