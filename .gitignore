@@ -4,7 +4,9 @@ dist-site
 public
 tsconfig.tsbuildinfo
 deno.lock
-/scripts/
+/scripts/*
+!/scripts/convert-docs-pdf.mjs
 /pdf/
 docs/
 site/public/fixtures/
+/convert-docs-pdf.sh

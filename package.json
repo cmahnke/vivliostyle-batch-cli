@@ -27,7 +27,8 @@
     "loglevel": "^1.9.2",
     "mime-types": "^3.0.2",
     "pdf-lib": "^1.17.1",
-    "puppeteer-core": "^25.12.0"
+    "puppeteer-core": "^25.12.0",
+    "yargs": "^18.2.0"
   },
   "devDependencies": {
     "@puppeteer/browsers": "^3.2.4",
@@ -55,8 +56,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
     "vite": "^8.3.4",
-    "vitest": "^5.0.3",
-    "yargs": "^18.2.0"
+    "vitest": "^5.0.3"
   },
   "license": "MIT",
   "exports": {
@@ -66,6 +66,7 @@
   "files": [
     "dist",
     "src",
+    "scripts/convert-docs-pdf.mjs",
     "README.md",
     "LICENSE"
   ],
