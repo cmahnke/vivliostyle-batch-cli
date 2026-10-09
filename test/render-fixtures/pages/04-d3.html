@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: d3 SVG + canvas (mocked data)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #bars,
+      #scatter {
+        width: 600px;
+        break-inside: avoid;
+      }
+      #scatter {
+        height: 300px;
+      }
+    </style>
+    <script src="/vendor/d3/dist/d3.min.js"></script>
+  </head>
+  <body>
+    <h1>d3 fixture (mocked SVG bars + canvas scatter)</h1>
+    <div id="bars" class="script"></div>
+    <canvas id="scatter" class="script" width="600" height="300"></canvas>
+    <script>
+      window.__vivFixture = "d3";
+      window.__vivReady = false;
+      // Mocked dataset — hardcoded, no CSV/JSON fetch.
+      var data = [
+        { k: "a", v: 4 },
+        { k: "b", v: 8 },
+        { k: "c", v: 6 },
+        { k: "d", v: 10 },
+        { k: "e", v: 7 },
+        { k: "f", v: 3 }
+      ];
+      var W = 600,
+        H = 220,
+        pad = 30;
+      var svg = d3.select("#bars").append("svg").attr("width", W).attr("height", H);
+      var x = d3
+        .scaleBand()
+        .domain(
+          data.map(function (d) {
+            return d.k;
+          })
+        )
+        .range([pad, W - pad])
+        .padding(0.2);
+      var y = d3
+        .scaleLinear()
+        .domain([0, 12])
+        .range([H - pad, pad]);
+      svg
+        .selectAll("rect")
+        .data(data)
+        .join("rect")
+        .attr("x", function (d) {
+          return x(d.k);
+        })
+        .attr("y", function (d) {
+          return y(d.v);
+        })
+        .attr("width", x.bandwidth())
+        .attr("height", function (d) {
+          return H - pad - y(d.v);
+        })
+        .attr("fill", "#3366cc");
+      svg.append("text").attr("x", pad).attr("y", 18).text("mocked d3 bars 42");
+      // Canvas scatter of the same data (needs HiDPI upscale to stay sharp).
+      var c = document.getElementById("scatter");
+      function draw(f) {
+        f = f || 1;
+        var cssW = 600,
+          cssH = 300;
+        c.width = Math.ceil(cssW * f);
+        c.height = Math.ceil(cssH * f);
+        var ctx = c.getContext("2d");
+        ctx.scale(f, f);
+        ctx.fillStyle = "#f5f5f5";
+        ctx.fillRect(0, 0, cssW, cssH);
+        var sx = d3
+          .scaleLinear()
+          .domain([0, 12])
+          .range([pad, cssW - pad]);
+        var sy = d3
+          .scaleLinear()
+          .domain([0, 12])
+          .range([cssH - pad, pad]);
+        ctx.fillStyle = "#cc3333";
+        data.forEach(function (d, i) {
+          ctx.beginPath();
+          ctx.arc(sx(d.v), sy(i * 2 + 1), 8, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.fillStyle = "#111";
+        ctx.font = "16px serif";
+        ctx.fillText("mocked d3 scatter 42", pad, 22);
+      }
+      draw(1);
+      window.__vivResize = function (factor) {
+        draw(factor);
+      };
+      window.__vivReady = true;
+    </script>
+  </body>
+</html>

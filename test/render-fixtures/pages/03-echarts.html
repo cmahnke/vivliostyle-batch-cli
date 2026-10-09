@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: echarts (mocked data, canvas)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #chart {
+        width: 600px;
+        height: 400px;
+        break-inside: avoid;
+      }
+    </style>
+    <script src="/vendor/echarts/dist/echarts.min.js"></script>
+  </head>
+  <body>
+    <h1>echarts fixture (mocked bar+line)</h1>
+    <div id="chart" class="script"></div>
+    <script>
+      window.__vivFixture = "echarts";
+      window.__vivReady = false;
+      // Mocked dataset — inline, no fetch, deterministic (animation off).
+      var option = {
+        animation: false,
+        title: { text: "mocked sales 42" },
+        xAxis: { type: "category", data: ["A", "B", "C", "D", "E"] },
+        yAxis: { type: "value" },
+        series: [
+          { type: "bar", data: [12, 19, 3, 5, 2], itemStyle: { color: "#3366cc" } },
+          { type: "line", data: [4, 8, 6, 10, 7], lineStyle: { color: "#cc3333" } }
+        ]
+      };
+      var el = document.getElementById("chart");
+      var chart = echarts.init(el, null, { renderer: "canvas", devicePixelRatio: 1 });
+      chart.setOption(option);
+      window.__vivEchartsStatus = "painted";
+      window.__vivResize = function (factor) {
+        // HiDPI redraw: re-init at backing-store DPR, CSS size unchanged.
+        chart.dispose();
+        chart = echarts.init(el, null, { renderer: "canvas", devicePixelRatio: factor });
+        chart.setOption(option);
+        window.__vivEchartsStatus = "painted@" + factor;
+      };
+      if (typeof chart.on === "function") {
+        chart.on("finished", function () {
+          window.__vivReady = true;
+        });
+      }
+      window.__vivReady = true;
+    </script>
+  </body>
+</html>

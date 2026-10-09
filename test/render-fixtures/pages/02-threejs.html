@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: three.js WebGL (mocked scene)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #scene {
+        width: 600px;
+        height: 400px;
+        break-inside: avoid;
+      }
+      #fallback {
+        display: none;
+      }
+    </style>
+    <script type="importmap">
+      { "imports": { "three": "/vendor/three/build/three.module.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>three.js fixture (mocked box)</h1>
+    <div id="scene" class="script"></div>
+    <div id="fallback" data-webgl="unavailable">WebGL unavailable — software fallback mock</div>
+    <p id="status">loading mocked three.js…</p>
+    <script>
+      window.__vivFixture = "threejs";
+      window.__vivReady = false;
+    </script>
+    <script type="module">
+      import * as THREE from "three";
+      window.__vivFixture = "threejs";
+      window.__vivReady = false;
+      var container = document.getElementById("scene");
+      var renderer = null;
+      try {
+        renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      } catch (e) {
+        renderer = null;
+      }
+      if (!renderer || !renderer.getContext()) {
+        document.getElementById("fallback").style.display = "block";
+        window.__vivWebglStatus = "unavailable";
+        window.__vivReady = true;
+      } else {
+        renderer.setSize(600, 400);
+        renderer.setPixelRatio(1);
+        container.appendChild(renderer.domElement);
+        var scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf5f5f5);
+        var camera = new THREE.PerspectiveCamera(45, 600 / 400, 0.1, 100);
+        camera.position.set(2, 2, 3);
+        camera.lookAt(0, 0, 0);
+        var light = new THREE.DirectionalLight(0xffffff, 1.2);
+        light.position.set(3, 4, 5);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x888888));
+        // Mocked geometry: single box, fixed color — no external model/texture.
+        var mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x3366cc }));
+        mesh.rotation.set(0.5, 0.6, 0);
+        scene.add(mesh);
+        var edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), new THREE.LineBasicMaterial({ color: 0x111111 }));
+        edges.rotation.copy(mesh.rotation);
+        scene.add(edges);
+        renderer.render(scene, camera);
+        window.__vivWebglStatus = "painted";
+        // HiDPI hook: re-render at backing-store scale, CSS size unchanged.
+        window.__vivResize = function (factor) {
+          renderer.setPixelRatio(factor);
+          renderer.setSize(600, 400, false);
+          renderer.render(scene, camera);
+        };
+        window.__vivReady = true;
+      }
+    </script>
+  </body>
+</html>

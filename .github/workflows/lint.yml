@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,6 +53,63 @@ jobs:
         run: |
           npm i
           npm run test
+
+  render-fixtures:
+    # End-to-end proof that JS-painted content (canvas, WebGL, iframes, OSD
+    # tiles) lands in the PDF and that --pixel-ratio upscales backing pixels.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: ".nvmrc"
+          registry-url: "https://npm.pkg.github.com"
+      - run: npm i
+      - name: Install Chrome
+        run: npx -y @puppeteer/browsers install chrome@stable
+      - run: npm run build
+      - name: Render synthetic fixtures to PDF
+        run: |
+          set -euo pipefail
+          CLI="node dist/vivliostyle-batch-cli.js"
+          check_pdf() {
+            # $1 = pdf path, $2 = min bytes
+            test -f "$1" || { echo "missing: $1"; exit 1; }
+            size=$(wc -c < "$1")
+            test "$size" -ge "$2" || { echo "too small ($size bytes): $1"; exit 1; }
+            echo "ok: $1 ($size bytes)"
+          }
+          $CLI -i test/render-fixtures/pages/06-canvas-hires.html -o /tmp/hires.pdf \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee /tmp/hires.log
+          grep -q "resized=\[1200x600" /tmp/hires.log
+          check_pdf /tmp/hires.pdf 15000
+          $CLI -i test/render-fixtures/pages/03-echarts.html -o /tmp/echarts.pdf \
+            --static /vendor/echarts:$PWD/node_modules/echarts \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee /tmp/echarts.log
+          grep -q "resized=" /tmp/echarts.log
+          check_pdf /tmp/echarts.pdf 15000
+          $CLI -i test/render-fixtures/pages/04-d3.html -o /tmp/d3.pdf \
+            --static /vendor/d3:$PWD/node_modules/d3 \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee /tmp/d3.log
+          grep -q "resized=" /tmp/d3.log
+          check_pdf /tmp/d3.pdf 15000
+          $CLI -i test/render-fixtures/pages/02-threejs.html -o /tmp/three.pdf \
+            --static /vendor/three:$PWD/node_modules/three \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee /tmp/three.log
+          grep -q "Document created" /tmp/three.log
+          check_pdf /tmp/three.pdf 15000
+          $CLI -i test/render-fixtures/pages/05-openseadragon.html -o /tmp/osd.pdf \
+            --static /vendor/openseadragon:$PWD/node_modules/openseadragon \
+            --static /tiles:$PWD/test/render-fixtures/tiles \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee /tmp/osd.log
+          grep -q "Document created" /tmp/osd.log
+          check_pdf /tmp/osd.pdf 15000
+          $CLI -i test/render-fixtures/pages/01-iframe.html -o /tmp/iframe.pdf \
+            --wait-for-content 8000 --timeout 120000 2>&1 | tee /tmp/iframe.log
+          grep -q "iframes=2" /tmp/iframe.log
+          check_pdf /tmp/iframe.pdf 15000
 
   bun:
     runs-on: ubuntu-24.04

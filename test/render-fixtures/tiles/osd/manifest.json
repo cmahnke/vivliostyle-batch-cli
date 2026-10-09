@@ -1,0 +1,7 @@
+{
+  "description": "Mocked OpenSeadragon single-image source (offline fixture)",
+  "type": "image",
+  "url": "preview.png",
+  "width": 800,
+  "height": 600
+}

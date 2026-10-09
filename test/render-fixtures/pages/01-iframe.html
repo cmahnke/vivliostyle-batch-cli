@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: iframes (mocked)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      .script {
+        width: 600px;
+      }
+      iframe {
+        width: 600px;
+        height: 200px;
+        border: 1px solid #333;
+        break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Iframe fixture (mocked, offline)</h1>
+
+    <h2>1. srcdoc iframe (always servable)</h2>
+    <iframe
+      id="frame-srcdoc"
+      srcdoc="&lt;h1&gt;srcdoc mock&lt;/h1&gt;&lt;div style='width:100px;height:50px;background:#3366cc'&gt;&lt;/div&gt;&lt;p&gt;mocked srcdoc content 42&lt;/p&gt;"
+      title="srcdoc mock"
+    ></iframe>
+
+    <h2>2. same-origin iframe (sibling file)</h2>
+    <iframe id="frame-child" src="./iframe-child.html" title="same-origin mock"></iframe>
+
+    <h2>3. cross-origin note</h2>
+    <p id="xorigin-note">
+      Cross-origin embeds (maps, video) need <code>--allow-remote</code>/<code>--fetch-missing</code>; offline CI asserts only the two cases
+      above.
+    </p>
+
+    <script>
+      window.__vivFixture = "iframe";
+      window.__vivReady = false;
+      var pending = 2;
+      function done() {
+        pending--;
+        if (pending <= 0) window.__vivReady = true;
+      }
+      document.getElementById("frame-srcdoc").addEventListener("load", done);
+      document.getElementById("frame-child").addEventListener("load", done);
+      setTimeout(function () {
+        window.__vivReady = true;
+      }, 5000);
+    </script>
+  </body>
+</html>

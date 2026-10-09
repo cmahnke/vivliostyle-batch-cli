@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: canvas HiDPI dynamic resize (mocked)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #hires {
+        width: 600px;
+        height: 300px;
+        break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>canvas HiDPI fixture (mocked grid)</h1>
+    <canvas id="hires" class="script"></canvas>
+    <p id="hires-status">scale 1</p>
+    <script>
+      window.__vivFixture = "canvas-hires";
+      window.__vivReady = false;
+      var c = document.getElementById("hires");
+      var CSS_W = 600,
+        CSS_H = 300;
+      function draw(factor) {
+        c.width = Math.ceil(CSS_W * factor);
+        c.height = Math.ceil(CSS_H * factor);
+        var ctx = c.getContext("2d");
+        ctx.setTransform(factor, 0, 0, factor, 0, 0);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
+        // 1px grid: blurry at 96dpi print, sharp after 2x+ upscale.
+        ctx.strokeStyle = "#3366cc";
+        ctx.lineWidth = 1;
+        for (var x = 0; x <= CSS_W; x += 20) {
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, 0);
+          ctx.lineTo(x + 0.5, CSS_H);
+          ctx.stroke();
+        }
+        ctx.fillStyle = "#111";
+        ctx.font = "20px serif";
+        ctx.fillText("mocked hires grid 42 @x" + factor, 12, 30);
+        // Diagonal hairline stresses raster scaling.
+        ctx.strokeStyle = "#cc3333";
+        ctx.beginPath();
+        ctx.moveTo(0, CSS_H);
+        ctx.lineTo(CSS_W, 0);
+        ctx.stroke();
+        document.getElementById("hires-status").textContent = "scale " + factor + " → " + c.width + "x" + c.height;
+      }
+      draw(1);
+      // CLI pre-print hook: redraw at backing-store scale, CSS size unchanged.
+      window.__vivResize = function (factor) {
+        draw(factor);
+      };
+      window.__vivReady = true;
+    </script>
+  </body>
+</html>

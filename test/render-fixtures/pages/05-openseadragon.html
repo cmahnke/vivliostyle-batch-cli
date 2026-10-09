@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: OpenSeadragon (mocked single image)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #osd {
+        width: 600px;
+        height: 400px;
+        background: #eee;
+        break-inside: avoid;
+      }
+    </style>
+    <script src="/vendor/openseadragon/build/openseadragon/openseadragon.min.js"></script>
+  </head>
+  <body>
+    <h1>openseadragon fixture (mocked local image)</h1>
+    <div id="osd" class="script"></div>
+    <p id="osd-status">loading mock tile…</p>
+    <script>
+      window.__vivFixture = "openseadragon";
+      window.__vivReady = false;
+      // Mocked source: single local image (no DZI pyramid / IIIF network).
+      // prefixUrl (button images) is mapped to /vendor/openseadragon/.../images/ at test time.
+      var viewer = OpenSeadragon({
+        id: "osd",
+        prefixUrl: "/vendor/openseadragon/build/openseadragon/images/",
+        tileSources: { type: "image", url: "../tiles/osd/preview.png" },
+        showNavigator: false,
+        animationTime: 0
+      });
+      viewer.addHandler("open", function () {
+        viewer.viewport.goHome(true);
+        document.getElementById("osd-status").textContent = "mock tile open 42";
+        window.__vivOsdStatus = "open";
+        window.__vivReady = true;
+      });
+      viewer.addHandler("open-failed", function () {
+        document.getElementById("osd-status").textContent = "mock tile failed";
+        window.__vivOsdStatus = "failed";
+        window.__vivReady = true;
+      });
+      setTimeout(function () {
+        window.__vivReady = true;
+      }, 8000);
+    </script>
+  </body>
+</html>
