@@ -68,9 +68,13 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
       - run: npm i
       - name: Install Chrome
-        # setup-node points the registry at GitHub Packages above, where this
-        # helper is not published — fetch it from the public registry.
-        run: npx --registry=https://registry.npmjs.org -y @puppeteer/browsers install chrome@stable
+        # Pinned devDependency (@puppeteer/browsers exposes the `browsers`
+        # binary), resolved from node_modules — no registry juggling.
+        # Explicit cache dir: v3 would default to ./chrome, while the CLI
+        # looks in the puppeteer cache (see src/render/chrome.ts).
+        env:
+          PUPPETEER_CACHE_DIR: ~/.cache/puppeteer
+        run: npx browsers install chrome@stable
       - run: npm run build
       - name: Render synthetic fixtures to PDF
         run: |

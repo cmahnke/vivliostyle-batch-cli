@@ -27,6 +27,7 @@
     "puppeteer-core": "^25.12.0"
   },
   "devDependencies": {
+    "@puppeteer/browsers": "^3.2.4",
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-typescript": "^12.3.0",
