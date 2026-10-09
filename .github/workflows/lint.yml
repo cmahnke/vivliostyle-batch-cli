@@ -168,6 +168,7 @@ jobs:
           deno-version: v2.x
       - name: Install dependencies
         run: |
+          rm -f deno.lock package-lock.json
           deno install
       - name: Run linters
         run: |
