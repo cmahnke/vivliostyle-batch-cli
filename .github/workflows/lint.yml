@@ -68,7 +68,9 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
       - run: npm i
       - name: Install Chrome
-        run: npx -y @puppeteer/browsers install chrome@stable
+        # setup-node points the registry at GitHub Packages above, where this
+        # helper is not published — fetch it from the public registry.
+        run: npx --registry=https://registry.npmjs.org -y @puppeteer/browsers install chrome@stable
       - run: npm run build
       - name: Render synthetic fixtures to PDF
         run: |
