@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: wasm-computed graphic (mocked, delayed)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #stage {
+        width: 600px;
+        height: 300px;
+        break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>wasm fixture (mocked gradient, slow tail)</h1>
+    <canvas id="stage" class="script" width="600" height="300"></canvas>
+    <p id="wasm-status">loading mock wasm…</p>
+    <script>
+      window.__vivFixture = "wasm";
+      window.__vivReady = false;
+      var c = document.getElementById("stage");
+      var ctx = c.getContext("2d");
+
+      function paint(mem, w, h, factor) {
+        factor = factor || 1;
+        c.width = Math.ceil(600 * factor);
+        c.height = Math.ceil(300 * factor);
+        ctx.setTransform(factor, 0, 0, factor, 0, 0);
+        var img = ctx.createImageData(600, 300);
+        var data = img.data;
+        for (var y = 0; y < 300; y++) {
+          for (var x = 0; x < 600; x++) {
+            var src = (y * w + (x % w)) * 4;
+            var dst = (y * 600 + x) * 4;
+            data[dst] = mem[src];
+            data[dst + 1] = mem[src + 1];
+            data[dst + 2] = mem[src + 2];
+            data[dst + 3] = 255;
+          }
+        }
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, 600, 300);
+        ctx.putImageData(img, 0, 0);
+        ctx.fillStyle = "#111";
+        ctx.font = "20px serif";
+        ctx.fillText("mocked wasm gradient 42 @x" + factor, 12, 28);
+      }
+
+      // Same pattern as the real bundle (blog-visualisation): wasm via
+      // instantiateStreaming with a plain-instantiate fallback. The fetch is
+      // tracked by the settle wrapper; compilation by the wasm wrappers.
+      var wasmUrl = "../tiles/wasm/render.wasm";
+      var wasmBytes = null;
+      var compiles = WebAssembly.instantiateStreaming(fetch(wasmUrl))
+        .catch(function () {
+          // Server without application/wasm MIME: fall back to bytes.
+          return fetch(wasmUrl)
+            .then(function (r) {
+              return r.arrayBuffer();
+            })
+            .then(function (buf) {
+              return WebAssembly.instantiate(buf);
+            });
+        })
+        .then(function (result) {
+          var mem = new Uint8Array(result.instance.exports.memory.buffer, 0, 8 * 4 * 4);
+          result.instance.exports.render(8, 4);
+          wasmBytes = mem;
+          // Slow tail that the gate MUST observe: a ~350ms busy loop is a
+          // real long task (>50ms), reported by the longtask observer. A
+          // bare setTimeout would be invisible — the quiet gate fired long
+          // before the paint in early testing, and the PDF shipped an empty
+          // container.
+          return new Promise(function (resolve) {
+            setTimeout(function () {
+              var burnUntil = performance.now() + 350;
+              while (performance.now() < burnUntil) {
+                /* long task */
+              }
+              resolve();
+            }, 1200);
+          });
+        })
+        .then(function () {
+          if (wasmBytes) {
+            paint(wasmBytes, 8, 4, 1);
+            document.getElementById("wasm-status").textContent = "mocked wasm painted 42";
+            window.__vivWasmStatus = "painted";
+          } else {
+            document.getElementById("wasm-status").textContent = "wasm unavailable";
+            window.__vivWasmStatus = "unavailable";
+          }
+          window.__vivReady = true;
+        })
+        .catch(function (err) {
+          // Compile/load failure must not swallow readiness — the gate would
+          // otherwise wait for the deadline instead of settling.
+          document.getElementById("wasm-status").textContent = "wasm failed: " + err;
+          window.__vivWasmStatus = "failed";
+          window.__vivReady = true;
+        });
+
+      window.__vivResize = function (factor) {
+        if (wasmBytes) paint(wasmBytes, 8, 4, factor);
+      };
+    </script>
+  </body>
+</html>

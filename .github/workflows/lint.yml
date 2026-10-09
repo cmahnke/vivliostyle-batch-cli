@@ -100,6 +100,12 @@ jobs:
             --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/osd.log"
           $CLI -i test/render-fixtures/pages/01-iframe.html -o "$OUT/iframe.pdf" \
             --wait-for-content 8000 --timeout 120000 2>&1 | tee "$LOGS/iframe.log"
+          $CLI -i test/render-fixtures/pages/07-aframe.html -o "$OUT/aframe.pdf" \
+            --static /vendor/aframe:$PWD/node_modules/aframe \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/aframe.log"
+          $CLI -i test/render-fixtures/pages/08-wasm.html -o "$OUT/wasm.pdf" \
+            --static /tiles:$PWD/test/render-fixtures/tiles \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/wasm.log"
       - name: Collect showcase manifest
         # Asserts every marker itself (upscale sizes, frame counts, PDF sizes).
         run: |

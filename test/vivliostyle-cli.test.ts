@@ -548,6 +548,44 @@ describe("vivliostyle-cli", () => {
     expect(rewriteVirtualPathsToServer(html, {}, "http://127.0.0.1:1234")).toBe(html);
   });
 
+  it("rewriteCustomElementUrlsInDom resolves relative model URLs to server URLs", async () => {
+    const { rewriteCustomElementUrlsInDom } = await import("../src/vivliostyle-cli");
+    const { JSDOM } = await import("jsdom");
+
+    // Regression: the viewer mangled `../tiles/model.glb` on `<a-asset-item>`
+    // into `http://tiles/model.glb`, so the model 404'd and the canvas stayed
+    // empty. Absolute server URLs always resolve.
+    const dom = new JSDOM(`<html><body>
+      <a-scene><a-asset-item id="m" src="../tiles/aframe/mock.glb"></a-asset-item></a-scene>
+      <model-viewer src="./models/vase.glb"></model-viewer>
+      <img src="../img/photo.jpg">
+    </body></html>`);
+    const changed = rewriteCustomElementUrlsInDom(dom.window.document, "http://127.0.0.1:1/post/example/");
+
+    expect(changed).toBe(true);
+    const html = dom.serialize();
+    expect(html).toContain('src="http://127.0.0.1:1/post/tiles/aframe/mock.glb"');
+    expect(html).toContain('src="http://127.0.0.1:1/post/example/models/vase.glb"');
+    // Standard elements are the viewer's own business and stay untouched.
+    expect(html).toContain('src="../img/photo.jpg"');
+  });
+
+  it("rewriteCustomElementUrlsInDom leaves absolute, remote and empty URLs alone", async () => {
+    const { rewriteCustomElementUrlsInDom } = await import("../src/vivliostyle-cli");
+    const { JSDOM } = await import("jsdom");
+
+    const dom = new JSDOM(`<html><body>
+      <a-asset-item src="https://cdn.example.com/model.glb"></a-asset-item>
+      <a-asset-item src="data:model/gltf-binary;base64,AAA"></a-asset-item>
+      <a-asset-item src="/tiles/absolute.glb"></a-asset-item>
+      <model-viewer src=""></model-viewer>
+    </body></html>`);
+    expect(rewriteCustomElementUrlsInDom(dom.window.document, "http://127.0.0.1:1/post/")).toBe(false);
+    const html = dom.serialize();
+    expect(html).toContain('src="https://cdn.example.com/model.glb"');
+    expect(html).toContain('src="/tiles/absolute.glb"');
+  });
+
   // ---------------------------------------------------------------------------
   // urlToStaticMapping
   // ---------------------------------------------------------------------------
@@ -1205,9 +1243,43 @@ describe("vivliostyle-cli", () => {
     expect(resolveSettleGate({ waitForContent: undefined } as never)).toBeNull();
     expect(resolveSettleGate({ waitForContent: true } as never)).toEqual({ quietMs: 400, deadlineMs: 25_000 });
     expect(resolveSettleGate({ waitForContent: "3000", quietMs: "50" } as never)).toEqual({ quietMs: 50, deadlineMs: 3000 });
+    // 0 disables the wait entirely (including the automatic one).
+    expect(resolveSettleGate({ waitForContent: "0" } as never)).toBeNull();
     // Vivliostyle gives up on images after 30s, so the gate must open before that.
     expect(resolveSettleGate({ waitForContent: "99000" } as never)?.deadlineMs).toBe(25_000);
     expect(() => resolveSettleGate({ waitForContent: "nope" } as never)).toThrow(/Invalid --wait-for-content/);
+    expect(() => resolveSettleGate({ waitForContent: "-1" } as never)).toThrow(/Invalid --wait-for-content/);
+  });
+
+  it("resolveEffectiveSettle auto-arms on script pages only", async () => {
+    const { resolveEffectiveSettle } = await import("../src/vivliostyle-cli");
+
+    // No scripts → no waiting, no auto-arm.
+    expect(resolveEffectiveSettle({ waitForContent: undefined } as never, false)).toEqual({ gate: null, autoArmed: false });
+    // Scripts → automatic gate with the 10s deadline.
+    expect(resolveEffectiveSettle({ waitForContent: undefined } as never, true)).toEqual({
+      gate: { quietMs: 400, deadlineMs: 10_000 },
+      autoArmed: true
+    });
+    // Explicit flag wins over auto-arm.
+    expect(resolveEffectiveSettle({ waitForContent: "3000" } as never, true)).toEqual({
+      gate: { quietMs: 400, deadlineMs: 3000 },
+      autoArmed: false
+    });
+    // Explicit 0 disables even on script pages.
+    expect(resolveEffectiveSettle({ waitForContent: "0" } as never, true)).toEqual({ gate: null, autoArmed: false });
+  });
+
+  it("the runtime script tracks wasm compilation, long tasks and fonts", async () => {
+    const { buildRuntimeScript } = await import("../src/vivliostyle-cli");
+    const script = buildRuntimeScript({
+      origin: "http://127.0.0.1:1",
+      documentBaseUrl: "http://127.0.0.1:1/",
+      gate: { quietMs: 400, deadlineMs: 1000 }
+    });
+    for (const marker of ["instantiateStreaming", "compileStreaming", "longtask", 'document.fonts.status==="loading"']) {
+      expect(script, marker).toContain(marker);
+    }
   });
 
   it("the runtime script routes URLs and reports through absolute URLs", async () => {

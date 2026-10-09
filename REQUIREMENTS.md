@@ -66,11 +66,15 @@ the machine.
   document images before paginating, so layout is postponed until charts and
   canvases painted. Hard limit capped at 25000ms (Vivliostyle gives up on
   images after 30s).
-- Tracker wraps `fetch`/XHR, watches `iframe` load/error (+3s grace),
-  `MutationObserver` + `ResizeObserver`; signals `quiet` (no request in flight,
-  no pending frames, height stable for `--quiet-ms`, default 400ms),
-  `ready` (page set `window.__vivReady === true` with no pending work — used by
-  deterministic chart/WebGL/OSD pages), or `deadline`.
+- Pages with `<script>` tags arm the wait automatically (deadline 10s);
+  `--wait-for-content 0` disables it, an explicit value wins (capped 25s).
+- Tracker wraps `fetch`/XHR, `WebAssembly.instantiate`/`compile` (+ streaming
+  variants), `iframe` load/error (+3s grace), `MutationObserver` +
+  `ResizeObserver` + `longtask` PerformanceObserver + `document.fonts`;
+  signals `quiet` (nothing in flight, no pending frames, height stable for
+  `--quiet-ms`, default 400ms), `ready` (page set `window.__vivReady === true`
+  with no pending work — used by deterministic chart/WebGL/OSD pages), or
+  `deadline`.
 - Settle detail logs `devicePixelRatio`, canvas sizes
   (`widthxheight@clientW×clientH`), painted-canvas count, container sizes,
   `pending/frames/mutations` — making resolution problems visible.
@@ -141,9 +145,13 @@ false`) and returns the viewer URL; build renders all pages to PDF.
   frame), `03-echarts.html` (mocked bar+line, canvas, `animation:false`),
   `04-d3.html` (mocked SVG bars + canvas scatter), `05-openseadragon.html`
   (mocked local single-image source), `06-canvas-hires.html` (dynamic-resize
-  proof). All data inline/mocked; no network.
-- Libraries are resolved from `node_modules` (`three`, `echarts`, `d3`,
-  `openseadragon` devDependencies) via `/vendor/*` → `--static` mappings at
+  proof), `07-aframe.html` (embedded scene with mocked box + local mock GLB
+  via `<a-asset-item>`, VR UI disabled), `08-wasm.html` (hand-assembled
+  wasm module paints a canvas gradient via `instantiateStreaming`, with a
+  1.2s post-compile tail that regression-tests the default wait). All data
+  inline/mocked; no network.
+- Libraries are resolved from `node_modules` (`three`, `aframe`, `echarts`,
+  `d3`, `openseadragon` devDependencies) via `/vendor/*` → `--static` mappings at
   test runtime; nothing is vendored into the repo. `docs/` is gitignored scratch
   data and must not be referenced.
 - Fixture contract: deterministic, fixed print-safe container sizes,

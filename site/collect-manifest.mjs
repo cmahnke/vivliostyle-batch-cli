@@ -89,12 +89,33 @@ export const FIXTURES = [
     log: "iframe.log",
     probeName: "iframe",
     marker: /iframes=2/
+  },
+  {
+    id: "aframe",
+    title: "A-Frame scene + mock model",
+    lib: "aframe",
+    page: "07-aframe.html",
+    pdf: "aframe.pdf",
+    log: "aframe.log",
+    probeName: "aframe",
+    marker: /Document created/
+  },
+  {
+    id: "wasm",
+    title: "Wasm-computed graphic (delayed)",
+    lib: "webassembly",
+    page: "08-wasm.html",
+    pdf: "wasm.pdf",
+    log: "wasm.log",
+    probeName: "wasm",
+    marker: /resized=\[1200x600/
   }
 ];
 
 /** Vendor files copied from node_modules into the deploy artifact. */
 export const VENDOR_FILES = [
   "three/build/three.module.js",
+  "aframe/dist/aframe-master.min.js",
   "echarts/dist/echarts.min.js",
   "d3/dist/d3.min.js",
   "openseadragon/build/openseadragon/openseadragon.min.js"

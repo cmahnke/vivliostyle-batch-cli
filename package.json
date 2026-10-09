@@ -39,6 +39,7 @@
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.6.4",
     "@types/serve-static": "^2.2.0",
+    "aframe": "^1.8.0",
     "d3": "^7.9.0",
     "echarts": "^6.1.0",
     "eslint": "^10.12.0",
@@ -54,7 +55,8 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
     "vite": "^8.3.4",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "yargs": "^18.2.0"
   },
   "license": "MIT",
   "exports": {

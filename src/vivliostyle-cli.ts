@@ -194,7 +194,7 @@ export function buildRuntimeScript(options: RuntimeScriptOptions): string {
   return `(function(){
 var ORIGIN=${JSON.stringify(origin)},BASE=${JSON.stringify(documentBaseUrl)};
 var QUIET=${gate?.quietMs ?? 400},DEADLINE=${gate?.deadlineMs ?? 10000},FRAME_GRACE=3000;
-var pending=0,frames=0,last=0,mutations=0,done=false;
+var pending=0,frames=0,last=0,mutations=0,done=false,longtasks=0;
 var state=window.__vivSettle={done:false,reason:null,at:0,pending:0,frames:0,mutations:0,dpr:window.devicePixelRatio};
 
 // Root-relative URLs resolve against the site root, document-relative ones
@@ -228,7 +228,7 @@ function signal(why){
   var at=Math.round(performance.now());
   state.done=true;state.reason=why;state.at=at;state.pending=pending;state.frames=frames;state.mutations=mutations;
   var url=ORIGIN+"/__viv-settle-ready?reason="+encodeURIComponent(why)+"&ms="+at+
-    "&pending="+pending+"&frames="+frames+"&mutations="+mutations+"&dpr="+window.devicePixelRatio+
+    "&pending="+pending+"&frames="+frames+"&mutations="+mutations+"&longtasks="+longtasks+"&dpr="+window.devicePixelRatio+
     "&painted="+paintedCanvases()+"&ready="+(window.__vivReady===true?1:0)+
     "&canvases="+encodeURIComponent(canvases())+"&containers="+encodeURIComponent(containers());
   try{navigator.sendBeacon?navigator.sendBeacon(url):fetch(url,{keepalive:true});}catch(e){}
@@ -266,6 +266,25 @@ if(XHR){var open=XHR.prototype.open,send=XHR.prototype.send;
   XHR.prototype.send=function(){if(this.__vscounted&&!this.__vsdone){this.__vsdone=true;pending++;last=performance.now();
     this.addEventListener("loadend",function(){pending--;last=performance.now();});}
     return send.apply(this,arguments);};}
+// WebAssembly compilation runs after its fetch resolves, so the fetch wrapper
+// alone would report idle mid-compile. Hold pending through it.
+var WA=window.WebAssembly;
+if(WA){["instantiate","instantiateStreaming","compile","compileStreaming"].forEach(function(n){
+  var orig=WA[n];if(typeof orig!=="function")return;
+  WA[n]=function(){pending++;last=performance.now();
+    var result;
+    try{result=orig.apply(this,arguments);}catch(e){pending--;last=performance.now();throw e;}
+    if(result&&typeof result.then==="function"){
+      return result.then(function(v){pending--;last=performance.now();return v;},
+        function(e){pending--;last=performance.now();throw e;});
+    }
+    pending--;last=performance.now();return result;};});}
+// Heavy main-thread work (script eval, wasm compile, shader/layout jank)
+// emits no network or DOM signal; long tasks keep the quiet window open.
+try{var PO=window.PerformanceObserver;
+if(typeof PO==="function"){new PO(function(list){
+  var entries=list.getEntries();for(var i=0;i<entries.length;i++){longtasks++;last=performance.now();}
+}).observe({entryTypes:["longtask"]});}}catch(e){}
 ["Image","Audio"].forEach(function(n){
   var Orig=window[n];if(!Orig)return;
   var Wrapped=function(u){return new Orig(fix(u));};
@@ -290,6 +309,8 @@ last=performance.now();
   ${expandDetailsTick}
   var now=performance.now();
   if(now>=DEADLINE){signal("deadline");return;}
+  // Webfonts loading late would leave canvas text painted with fallbacks.
+  try{if(document.fonts&&document.fonts.status==="loading"){setTimeout(check,50);return;}}catch(e){}
   // Deterministic pages (charts, WebGL, OSD fixtures) set __vivReady when
   // painted instead of making the gate guess from network quietness. Shader
   // compile and tile decode finish after the last fetch, so readiness wins.
@@ -713,6 +734,70 @@ export function rewriteVirtualPathsToServerInDom(
 }
 
 /**
+ * Resolves relative URLs on custom elements (`<a-asset-item>`,
+ * `<model-viewer>`, and any tag name containing a dash) to absolute server
+ * URLs.
+ *
+ * Vivliostyle resolves the subresource attributes it knows (`<img>`,
+ * `<iframe>`, …) correctly, but mangles relative URLs on elements it does not
+ * understand — `../tiles/model.glb` on an `<a-asset-item>` came back as
+ * `http://tiles/model.glb`. Absolute server URLs always resolve, so pages hand
+ * the viewer those instead. Standard elements are left alone (the viewer and
+ * the runtime URL shim already handle them); only dash-tagged elements, whose
+ * attributes the viewer cannot be trusted with, are rewritten.
+ */
+export function rewriteCustomElementUrlsInDom(document: Document, documentDirUrl: string): boolean {
+  let changed = false;
+
+  const resolveOne = (url: string): string => {
+    const current = url.trim();
+    if (current === "" || current.startsWith("#") || current.startsWith("?") || current.startsWith("//")) return current;
+    // Absolute URLs (http:, data:, blob:, …) resolve as-is; root-relative ones
+    // are covered by the server-URL rewrite.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(current) || current.startsWith("/")) return current;
+    try {
+      const resolved = new URL(current, documentDirUrl).href;
+      return resolved === current ? current : resolved;
+    } catch {
+      return current;
+    }
+  };
+
+  const apply = (el: Element, attr: "src" | "srcset"): void => {
+    const raw = el.getAttribute(attr);
+    if (raw === null) return;
+    if (attr === "src") {
+      const next = resolveOne(raw);
+      if (next === raw.trim() || next === raw) return;
+      el.setAttribute(attr, next);
+      changed = true;
+      return;
+    }
+    const kept = raw
+      .split(",")
+      .map((candidate) => candidate.trim())
+      .filter(Boolean)
+      .map((candidate) => {
+        const [url, ...descriptor] = candidate.split(/\s+/);
+        return [resolveOne(url), ...descriptor].join(" ");
+      });
+    const next = kept.join(", ");
+    if (next === raw) return;
+    el.setAttribute(attr, next);
+    changed = true;
+  };
+
+  for (const el of document.querySelectorAll("[src],[srcset]")) {
+    // Tag names are upper-cased in HTML documents; the dash test is case-free.
+    if (!el.tagName.includes("-")) continue;
+    apply(el, "src");
+    apply(el, "srcset");
+  }
+
+  return changed;
+}
+
+/**
  * Returns a predicate that reports whether a root-relative path can be served
  * from one of the configured asset-base local roots.
  *
@@ -846,10 +931,19 @@ export function buildPreviewHtml(
   const changed = rewriteAbsoluteUrlsInDom(document, assetBases);
   if (changed) log.trace("buildPreviewHtml: rewrote absolute URLs → virtual paths");
 
+  // Same custom-element fix as the build path: the viewer mangles relative
+  // URLs on elements it does not understand. Only applied when the caller
+  // knows the document's directory on the server (see startPreview).
+  const customChanged =
+    options.documentBaseUrl === undefined || options.documentBaseUrl === null
+      ? false
+      : rewriteCustomElementUrlsInDom(document, options.documentBaseUrl);
+  if (customChanged) log.trace("buildPreviewHtml: resolved custom-element URLs → server URLs");
+
   const dropped = options.allowRemote ? [] : dropRemoteReferencesInDom(document);
   if (dropped.length > 0) reportDroppedRemoteRefs(dropped);
 
-  if (!changed && dropped.length === 0) {
+  if (!changed && !customChanged && dropped.length === 0) {
     log.trace("buildPreviewHtml: no URL rewrites needed, using original file");
     return { htmlPath: inputAbs, extraStatic, cleanup: () => undefined };
   }
@@ -908,6 +1002,10 @@ export function prepareInputHtmlForBuild(
   const srvChanged = rewriteVirtualPathsToServerInDom(document, staticMapKeys, serverBaseUrl, probe);
   if (srvChanged) log.trace("prepareInputHtmlForBuild: rewrote virtual paths → server URLs");
 
+  const customBase = options.documentBaseUrl ?? `${serverBaseUrl}/`;
+  const customChanged = rewriteCustomElementUrlsInDom(document, customBase);
+  if (customChanged) log.trace("prepareInputHtmlForBuild: resolved custom-element URLs → server URLs", { customBase });
+
   const gone = options.unavailableUrls === undefined ? [] : dropUnavailableReferencesInDom(document, options.unavailableUrls);
 
   const dropped = options.allowRemote ? [] : dropRemoteReferencesInDom(document, isStaticServerUrl(serverBaseUrl));
@@ -928,7 +1026,15 @@ export function prepareInputHtmlForBuild(
     log.trace("prepareInputHtmlForBuild: injected runtime script", { origin, documentBaseUrl, gate: options.settle });
   }
 
-  if (!absChanged && !srvChanged && dropped.length === 0 && gone.length === 0 && options.settle == null && !wantsRuntime) {
+  if (
+    !absChanged &&
+    !srvChanged &&
+    !customChanged &&
+    dropped.length === 0 &&
+    gone.length === 0 &&
+    options.settle == null &&
+    !wantsRuntime
+  ) {
     log.trace("prepareInputHtmlForBuild: no changes, using original file");
     return { vivliostyleInput: inputAbs, cleanup: () => undefined };
   }
@@ -1298,8 +1404,10 @@ function buildProgram(): Command {
       "--wait-for-content [ms]",
       [
         "Delay pagination until the page's own async work finished: no request in",
-        "flight and the document height stable for --quiet-ms (default 400).",
-        "Without [ms] the hard limit of 25000ms applies; larger values are capped."
+        "flight, no wasm compiling, no long task running and the document height",
+        "stable for --quiet-ms (default 400). Pages with <script> wait",
+        "automatically (deadline 10000ms); 0 disables, larger values capped at",
+        "25000ms."
       ].join("\n      ")
     )
     .option("--quiet-ms <ms>", "Quiet period before the layout gate opens (default 400)")
@@ -1433,9 +1541,15 @@ function resolveInternalLogLevel(options: CliOptions): LogLevel {
  */
 const MAX_SETTLE_DEADLINE_MS = 25_000;
 
+/** Deadline for the automatic wait on script-driven pages (see below). */
+const AUTO_SETTLE_DEADLINE_MS = 10_000;
+
 export function resolveSettleGate(options: CliOptions): SettleGate | null {
   const raw = options.waitForContent;
   if (raw === undefined || raw === false) return null;
+  // Explicit 0 disables the wait — including the automatic one for pages
+  // with scripts (see resolveEffectiveSettle).
+  if (raw === "0") return null;
 
   const requested = typeof raw === "string" && raw !== "" ? Number.parseInt(raw, 10) : MAX_SETTLE_DEADLINE_MS;
   if (!Number.isFinite(requested) || requested <= 0) throw new Error(`Invalid --wait-for-content: "${String(raw)}"`);
@@ -1447,6 +1561,21 @@ export function resolveSettleGate(options: CliOptions): SettleGate | null {
     quietMs: quietRaw,
     deadlineMs: Math.min(requested, MAX_SETTLE_DEADLINE_MS)
   };
+}
+
+/**
+ * Settle gate that actually applies: an explicit `--wait-for-content` wins;
+ * otherwise pages that run scripts wait automatically (charts, wasm, WebGL
+ * would otherwise race pagination), static pages don't wait at all.
+ */
+export function resolveEffectiveSettle(options: CliOptions, hasScripts: boolean): { gate: SettleGate | null; autoArmed: boolean } {
+  const explicit = resolveSettleGate(options);
+  if (explicit !== null || options.waitForContent !== undefined) return { gate: explicit, autoArmed: false };
+  if (!hasScripts) return { gate: null, autoArmed: false };
+
+  const quietRaw = options.quietMs === undefined ? 400 : Number.parseInt(options.quietMs, 10);
+  if (!Number.isFinite(quietRaw) || quietRaw <= 0) throw new Error(`Invalid --quiet-ms: "${String(options.quietMs)}"`);
+  return { gate: { quietMs: quietRaw, deadlineMs: AUTO_SETTLE_DEADLINE_MS }, autoArmed: true };
 }
 
 export async function execute(options: CliOptions, extraArgs: string[] = []): Promise<void> {
@@ -1553,7 +1682,12 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
   const metaFields = pickDefinedStrings(options, ["title", "author", "language"]);
 
   const fetchMissing = options.fetchMissing === true || options.allowRemote === true;
-  const settle = resolveSettleGate(options);
+  // The wait arms automatically on script-driven pages: without it, charts,
+  // wasm and WebGL race pagination and the PDF ships half-painted content.
+  const hasScripts = htmlMode && new JSDOM(readFileSync(inputAbs, "utf-8")).window.document.querySelector("script") !== null;
+  const { gate: settle, autoArmed } = resolveEffectiveSettle(options, hasScripts);
+  if (autoArmed)
+    log.info(`[wait] auto-armed for script-driven page (deadline ${AUTO_SETTLE_DEADLINE_MS}ms, disable with --wait-for-content 0)`);
   const htmlOptions: HtmlRewriteOptions = {
     allowRemote: fetchMissing,
     fetchMissing,
@@ -1720,7 +1854,12 @@ export async function startPreview(
     log: (message) => log.info(message)
   });
 
-  const prepared = buildPreviewHtml(inputAbs, assetBases, htmlOptions);
+  const prepared = buildPreviewHtml(inputAbs, assetBases, {
+    ...htmlOptions,
+    // The viewer is served next to the document, so custom-element URLs
+    // resolve against the document's own directory (see siteDirectory below).
+    documentBaseUrl: `${server.baseUrl}${siteDirectory(sitePath)}/`
+  });
   entry.localPath = prepared.htmlPath;
 
   const viewerPageUrl = `${server.baseUrl}${siteDirectory(sitePath)}/${VIEWER_PAGE_NAME}`;

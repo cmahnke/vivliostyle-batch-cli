@@ -5,7 +5,7 @@
 
 /**
  * Synthetic render fixtures (iframe, three.js, echarts, d3, OpenSeadragon,
- * HiDPI canvas) plus the render hardening around them.
+ * HiDPI canvas, A-Frame) plus the render hardening around them.
  *
  * Libraries are never vendored: fixtures reference `/vendor/*` virtual paths
  * that the test harness maps to `node_modules` at runtime (see VENDOR_MAP).
@@ -22,6 +22,7 @@ const PAGES_DIR = join(FIXTURE_ROOT, "pages");
 /** Virtual `/vendor/*` → real package directory, served via `--static`. */
 export const VENDOR_MAP: Record<string, string> = {
   "/vendor/three": resolve(__dirname, "../node_modules/three"),
+  "/vendor/aframe": resolve(__dirname, "../node_modules/aframe"),
   "/vendor/echarts": resolve(__dirname, "../node_modules/echarts"),
   "/vendor/d3": resolve(__dirname, "../node_modules/d3"),
   "/vendor/openseadragon": resolve(__dirname, "../node_modules/openseadragon")
@@ -34,7 +35,9 @@ export const FIXTURE_PAGES = [
   "03-echarts.html",
   "04-d3.html",
   "05-openseadragon.html",
-  "06-canvas-hires.html"
+  "06-canvas-hires.html",
+  "07-aframe.html",
+  "08-wasm.html"
 ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
@@ -44,6 +47,8 @@ describe("render fixtures (mocked, offline)", () => {
     }
     expect(existsSync(join(FIXTURE_ROOT, "tiles/osd/preview.png"))).toBe(true);
     expect(existsSync(join(FIXTURE_ROOT, "tiles/osd/manifest.json"))).toBe(true);
+    expect(existsSync(join(FIXTURE_ROOT, "tiles/aframe/mock.glb"))).toBe(true);
+    expect(existsSync(join(FIXTURE_ROOT, "tiles/wasm/render.wasm"))).toBe(true);
     expect(existsSync(join(FIXTURE_ROOT, "lib/ready.js"))).toBe(true);
   });
 
@@ -62,13 +67,15 @@ describe("render fixtures (mocked, offline)", () => {
       "03-echarts.html",
       "04-d3.html",
       "05-openseadragon.html",
-      "06-canvas-hires.html"
+      "06-canvas-hires.html",
+      "07-aframe.html",
+      "08-wasm.html"
     ]) {
       const html = readFileSync(join(PAGES_DIR, page), "utf-8");
       expect(html, `${page} sets __vivReady`).toContain("__vivReady");
       expect(html, `${page} tags fixture name`).toContain("__vivFixture");
     }
-    for (const page of ["02-threejs.html", "03-echarts.html", "04-d3.html", "06-canvas-hires.html"]) {
+    for (const page of ["02-threejs.html", "03-echarts.html", "04-d3.html", "06-canvas-hires.html", "07-aframe.html", "08-wasm.html"]) {
       expect(readFileSync(join(PAGES_DIR, page), "utf-8"), `${page} supports HiDPI redraw`).toContain("__vivResize");
     }
   });
@@ -78,6 +85,36 @@ describe("render fixtures (mocked, offline)", () => {
     expect(readFileSync(join(PAGES_DIR, "04-d3.html"), "utf-8")).toContain("mocked d3 bars 42");
     expect(readFileSync(join(PAGES_DIR, "05-openseadragon.html"), "utf-8")).toContain("../tiles/osd/preview.png");
     expect(readFileSync(join(PAGES_DIR, "06-canvas-hires.html"), "utf-8")).toContain("mocked hires grid 42");
+    expect(readFileSync(join(PAGES_DIR, "07-aframe.html"), "utf-8")).toContain("../tiles/aframe/mock.glb");
+  });
+
+  it("wasm module is a valid, deterministic render module", async () => {
+    const bytes = readFileSync(join(FIXTURE_ROOT, "tiles/wasm/render.wasm"));
+    // magic \0asm + version 1
+    expect([...bytes.subarray(0, 4)]).toEqual([0, 0x61, 0x73, 0x6d]);
+    expect(bytes.readUInt32LE(4)).toBe(1);
+    // Instantiates and paints a deterministic gradient (row 1 differs from 0).
+    const { instance } = await WebAssembly.instantiate(bytes, {});
+    const exports = instance.exports as { memory: WebAssembly.Memory; render: (w: number, h: number) => void };
+    exports.render(8, 2);
+    const mem = new Uint8Array(exports.memory.buffer, 0, 8 * 2 * 4);
+    expect(mem[0]).toBe(0);
+    expect(mem[(8 * 1 + 4) * 4]).toBe(8); // R of row 1, col 4
+    expect(mem[(8 * 1 + 4) * 4 + 3]).toBe(255);
+  });
+
+  it("wasm fixture mirrors the real bundle pattern (streaming + fallback + slow tail)", () => {
+    const html = readFileSync(join(PAGES_DIR, "08-wasm.html"), "utf-8");
+    expect(html).toContain("instantiateStreaming");
+    expect(html).toContain("WebAssembly.instantiate");
+    expect(html).toContain("../tiles/wasm/render.wasm");
+    // The tail is a real long task (busy loop), not a bare timer: only that
+    // keeps the quiet gate open through post-compile init work.
+    expect(html).toContain("burnUntil");
+    expect(html).toContain("1200");
+    expect(html).toContain("mocked wasm gradient 42");
+    // A failed load must not swallow readiness (gate would hit the deadline).
+    expect(html).toContain(".catch");
   });
 
   it("three.js fixture uses an importmap to node_modules (ESM, no vendored copy)", () => {
@@ -86,8 +123,20 @@ describe("render fixtures (mocked, offline)", () => {
     expect(html).toContain("/vendor/three/build/three.module.js");
   });
 
+  it("aframe fixture embeds a scene with a locally mocked model", () => {
+    const html = readFileSync(join(PAGES_DIR, "07-aframe.html"), "utf-8");
+    expect(html).toContain("<a-scene");
+    expect(html).toContain('xr-mode-ui="enabled: false"');
+    expect(html).toContain("/vendor/aframe/dist/aframe-master.min.js");
+    expect(html).toContain('<a-asset-item id="mock-model" src="../tiles/aframe/mock.glb">');
+    // A-Frame sizes its canvas from the scene element's own box; without an
+    // explicit size the canvas stays 0x0 inside paginated viewer layout.
+    expect(html).toContain("#stage a-scene");
+  });
+
   it("VENDOR_MAP points at installed packages", () => {
     expect(existsSync(join(VENDOR_MAP["/vendor/three"], "build/three.module.js"))).toBe(true);
+    expect(existsSync(join(VENDOR_MAP["/vendor/aframe"], "dist/aframe-master.min.js"))).toBe(true);
     expect(existsSync(join(VENDOR_MAP["/vendor/echarts"], "dist/echarts.min.js"))).toBe(true);
     expect(existsSync(join(VENDOR_MAP["/vendor/d3"], "dist/d3.min.js"))).toBe(true);
     expect(existsSync(join(VENDOR_MAP["/vendor/openseadragon"], "build/openseadragon/openseadragon.min.js"))).toBe(true);

@@ -191,7 +191,19 @@ export async function startStaticServer(options: StaticServerOptions = {}, port 
 
     if (urlPath === SETTLE_READY_PATH) {
       const detail: Record<string, unknown> = {};
-      for (const key of ["reason", "ms", "pending", "frames", "canvases", "containers", "mutations", "dpr", "painted", "ready"]) {
+      for (const key of [
+        "reason",
+        "ms",
+        "pending",
+        "frames",
+        "canvases",
+        "containers",
+        "mutations",
+        "dpr",
+        "painted",
+        "ready",
+        "longtasks"
+      ]) {
         const value = query.get(key);
         if (value === null) continue;
         detail[key] = /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value;
