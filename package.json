@@ -4,7 +4,7 @@
   "type": "module",
   "description": "A vivliostyle-cli with more options for batch processing",
   "bin": {
-    "vivliostyle-batch-cli": "dist/vivliostyle-batch-cli.js"
+    "vivliostyle-cli": "dist/vivliostyle-batch-cli.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -12,7 +12,7 @@
   "scripts": {
     "test": "npx vitest",
     "build": "npx rimraf dist/* && npx rollup -c",
-    "start": "node dist/vivliostyle-cli.js",
+    "start": "node dist/vivliostyle-batch-cli.js",
     "format": "npx prettier . --check",
     "clean": "npx rimraf dist/*",
     "lint": "npx tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0",
@@ -59,7 +59,7 @@
   "license": "MIT",
   "exports": {
     "types": "./dist/index.d.ts",
-    "import": "./dist/vivliostyle-cli.js"
+    "import": "./dist/vivliostyle-batch-cli.js"
   },
   "files": [
     "dist",

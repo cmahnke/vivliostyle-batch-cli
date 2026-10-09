@@ -1281,7 +1281,7 @@ function buildProgram(): Command {
         "Keep subresource references that would be fetched from the network.",
         "By default every reference without a local file is removed from the",
         "input HTML so that nothing is loaded from the web.",
-        "Hyperlinks (<a href>) are never touched. Alias of --fetch-missing."
+        "Hyperlinks (<a href>) are never touched. See also --fetch-missing."
       ].join("\n      ")
     )
     .option(
@@ -1299,7 +1299,7 @@ function buildProgram(): Command {
       [
         "Delay pagination until the page's own async work finished: no request in",
         "flight and the document height stable for --quiet-ms (default 400).",
-        "Falls back to the hard limit (default 10000ms, capped at 25000ms)."
+        "Without [ms] the hard limit of 25000ms applies; larger values are capped."
       ].join("\n      ")
     )
     .option("--quiet-ms <ms>", "Quiet period before the layout gate opens (default 400)")

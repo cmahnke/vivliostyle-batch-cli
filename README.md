@@ -9,6 +9,8 @@ It runs the [Vivliostyle viewer](https://www.npmjs.com/package/@vivliostyle/view
 - Build PDF output from an HTML file
 - Preview documents in the browser
 - Render with the real browser engine, so canvas charts, WebGL scenes and cross-origin iframes end up in the PDF
+- Stay sharp past 96dpi: `--pixel-ratio` redraws JS-painted content at higher backing resolution
+- Per-push showcase page (GitHub Pages) with the render fixtures next to their PDFs
 - Automatic detection and mapping of static assets from HTML (`<link>`, `<script>`, `<img>`, etc.)
 - Support for custom static asset mappings via `--static`
 - Map external URLs (CDNs, etc.) to local directories using `--asset-base`
@@ -62,30 +64,30 @@ vivliostyle-cli -i index.html -o output.pdf -- --size A4 --viewer-param pixelRat
 
 ## Options
 
-| Option                              | Description                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------ |
-| `-i, --input <input>`               | Input HTML file (required)                                                           |
-| `-o, --output <file>`               | Output file path (default: `output.pdf`)                                             |
-| `--title <title>`                   | Document title (overrides source)                                                    |
-| `--author <author>`                 | Document author                                                                      |
-| `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`) (default: `de`)                        |
-| `--static <mapping>`                | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)             |
-| `--no-scripts`                      | Do not map `<script src>` tags as static assets                                      |
-| `--asset-base <urlBase=localBase>`  | Map URLs starting with `urlBase` to files under `localBase` (repeatable)             |
-| `--ignore-asset <path>`             | Skip specific virtual paths when deriving static mappings (repeatable)               |
-| `--allow-remote`                    | Keep subresource references that would be fetched from the network (default: drop)   |
-| `--executable-browser <path>`       | Chrome/Chromium binary to render with (default: search puppeteer cache, then system) |
-| `--dump-html <dir>`                 | Write the rewritten input HTML into `<dir>` and keep it (debugging aid)              |
-| `--fetch-missing` ----------------- | Load references without a local file from the web (alias of `--allow-remote`) -----  |
-| `--wait-for-content [ms]` --------- | Delay pagination until the page finished its own async work -----------------------  |
-| `--quiet-ms <ms>` ----------------- | Quiet period before the layout gate opens (default 400) ---------------------------  |
-| `--pixel-ratio <n>` --------------- | Render at `n` times the output resolution (Vivliostyle `pixelRatio`) --------------  |
-| `--timeout <ms>` ------------------ | Give up on a page after `<ms>` (default: 300000) ---------------------------------   |
-| `--format <format>`                 | Output format: `pdf` (default: `pdf`)                                                |
-| `--log-level <level>`               | Log level: `silent`, `info`, `verbose`, or `debug` (default: `info`)                 |
-| `--mode <mode>`                     | Execution mode: `build` or `preview` (default: `build`)                              |
-| `--preview`                         | Shorthand for `--mode preview` — open result in browser                              |
-| `-d, --debug`                       | Enable debug mode (sets log level to `debug`)                                        |
+| Option                              | Description                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `-i, --input <input>`               | Input HTML or publication manifest file (required)                                                                  |
+| `-o, --output <file>`               | Output file path (default: `output.pdf`)                                                                            |
+| `--title <title>`                   | Document title (overrides source)                                                                                   |
+| `--author <author>`                 | Document author                                                                                                     |
+| `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`) (default: `de`)                                                       |
+| `--static <mapping>`                | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)                                            |
+| `--no-scripts`                      | Do not map `<script src>` tags as static assets                                                                     |
+| `--asset-base <urlBase=localBase>`  | Map URLs starting with `urlBase` to files under `localBase` (repeatable)                                            |
+| `--ignore-asset <path>`             | Skip specific virtual paths when deriving static mappings (repeatable)                                              |
+| `--allow-remote`                    | Keep subresource references that would be fetched from the network (default: drop)                                  |
+| `--executable-browser <path>`       | Chrome/Chromium binary to render with (default: search puppeteer cache, then system)                                |
+| `--dump-html <dir>`                 | Write the rewritten input HTML into `<dir>` and keep it (debugging aid)                                             |
+| `--fetch-missing`                   | Load references without a local file from the web (implies `--allow-remote`; drops gone remotes after a HEAD probe) |
+| `--wait-for-content [ms]` --------- | Delay pagination until the page finished its own async work (default limit 25000ms)                                 |
+| `--quiet-ms <ms>` ----------------- | Quiet period before the layout gate opens (default 400) ---------------------------                                 |
+| `--pixel-ratio <n>` --------------- | Render at `n` times the output resolution; redraws `__vivResize` pages at `n`× backing pixels                       |
+| `--timeout <ms>` ------------------ | Give up on a page after `<ms>` (default: 300000) ---------------------------------                                  |
+| `--format <format>`                 | Output format: `pdf` (default: `pdf`)                                                                               |
+| `--log-level <level>`               | Log level: `silent`, `info`, `verbose`, or `debug` (default: `info`)                                                |
+| `--mode <mode>`                     | Execution mode: `build` or `preview` (default: `build`)                                                             |
+| `--preview`                         | Shorthand for `--mode preview` — open result in browser                                                             |
+| `-d, --debug`                       | Enable debug mode (sets log level to `debug`)                                                                       |
 
 ## Notes
 

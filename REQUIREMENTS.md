@@ -120,8 +120,9 @@ false`) and returns the viewer URL; build renders all pages to PDF.
 ## 8. Browser resolution
 
 - `--executable-browser <path>` overrides; otherwise search order is
-  `CHROME_PATH` env → puppeteer cache (`~/.cache/puppeteer`) → system
-  Chrome/Chromium. Missing browser is a hard error with install hint.
+  `CHROME_PATH` env → puppeteer cache (`~/.cache/puppeteer`, overridable via
+  `PUPPETEER_CACHE_DIR`) → system Chrome/Chromium. Missing browser is a hard
+  error with install hint.
 - Extra Chrome args append to the hardened default set (field-trial/cache
   disabled, `disable-web-security`, `hide-scrollbars`, `mute-audio`,
   `force-device-scale-factor=1`).
