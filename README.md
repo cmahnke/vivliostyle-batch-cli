@@ -151,6 +151,11 @@ vivliostyle-cli -i index.html -o output.pdf \
 vivliostyle-cli -i index.html -o output.pdf -- --size A4
 ```
 
+## Citation
+
+If you use this software, please cite it using the metadata from [CITATION.cff](CITATION.cff).
+GitHub also offers a "Cite this repository" button based on this file.
+
 ## License
 
 MIT

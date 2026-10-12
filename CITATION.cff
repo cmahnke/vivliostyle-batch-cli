@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+title: vivliostyle-batch-cli
+type: software
+authors:
+  - family-names: Mahnke
+    given-names: Christian
+    orcid: "https://orcid.org/0009-0003-1361-4159"
+    email: mail@christianmahnke.de
+abstract: A vivliostyle-cli with more options for batch processing
+keywords:
+  - pdf
+  - css
+  - vivliostyle
+  - print
+license: MIT
+repository-code: "https://github.com/cmahnke/vivliostyle-batch-cli"
+version: "0.2.0"
+date-released: "2026-10-12"

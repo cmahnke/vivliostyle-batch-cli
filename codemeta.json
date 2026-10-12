@@ -1,0 +1,26 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "name": "vivliostyle-batch-cli",
+  "version": "0.2.0",
+  "dateReleased": "2026-10-12",
+  "description": "A vivliostyle-cli with more options for batch processing",
+  "identifier": "https://github.com/cmahnke/vivliostyle-batch-cli",
+  "codeRepository": "https://github.com/cmahnke/vivliostyle-batch-cli",
+  "issueTracker": "https://github.com/cmahnke/vivliostyle-batch-cli/issues",
+  "license": "https://spdx.org/licenses/MIT",
+  "author": {
+    "@type": "Person",
+    "givenName": "Christian",
+    "familyName": "Mahnke",
+    "identifier": "https://orcid.org/0009-0003-1361-4159",
+    "email": "mail@christianmahnke.de",
+    "url": "https://christianmahnke.de"
+  },
+  "programmingLanguage": "TypeScript",
+  "keywords": ["pdf", "css", "vivliostyle", "print"],
+  "developmentStatus": "https://www.repostatus.org/#wip",
+  "downloadUrl": "https://www.npmjs.com/package/@projektemacher/vivliostyle-batch-cli",
+  "readme": "https://github.com/cmahnke/vivliostyle-batch-cli#readme",
+  "runtimePlatform": "Node.js >= 20"
+}
