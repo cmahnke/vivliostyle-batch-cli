@@ -486,6 +486,31 @@ describe("vivliostyle-cli", () => {
     expect(urls.filter((u) => u === "/css/site.css")).toHaveLength(1);
   });
 
+  it("extractUrlsFromHtml collects defer, async and module script srcs", async () => {
+    const { extractUrlsFromHtml } = await import("../src/vivliostyle-cli");
+
+    const htmlFile = join(tempDir, "deferred-scripts.html");
+    writeFileSync(
+      htmlFile,
+      `<html><head>
+        <script defer src="/js/deferred.js"></script>
+        <script async src="/js/async.js"></script>
+        <script type="module" src="/js/module.js"></script>
+        <script defer type="module" src="/js/deferred-module.js"></script>
+      </head><body>
+        <script async src="./relative.js"></script>
+      </body></html>`,
+      "utf-8"
+    );
+
+    // Loading attributes must not change what gets collected: deferred, async
+    // and module scripts are subresources just like plain ones.
+    const urls = extractUrlsFromHtml(htmlFile, true);
+    expect(urls).toEqual(
+      expect.arrayContaining(["/js/deferred.js", "/js/async.js", "/js/module.js", "/js/deferred-module.js", "./relative.js"])
+    );
+  });
+
   // ---------------------------------------------------------------------------
   // rewriteAbsoluteUrls (string wrapper)
   // ---------------------------------------------------------------------------
@@ -726,6 +751,70 @@ describe("vivliostyle-cli", () => {
     await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf"), "--dump-html", dumpDir]);
 
     expect(readFileSync(join(dumpDir, "article.html"), "utf-8")).toContain("expandDetails");
+  });
+
+  it("injects the runtime script ahead of deferred, async and module scripts", async () => {
+    const { injectRuntimeScriptInDom } = await import("../src/vivliostyle-cli");
+    const { JSDOM } = await import("jsdom");
+
+    const dom = new JSDOM(`<html><head>
+      <script defer src="/vendor/lib.js"></script>
+      <script type="module" src="/vendor/module.js"></script>
+    </head><body><p>x</p></body></html>`);
+    const document = dom.window.document;
+
+    injectRuntimeScriptInDom(document, {
+      origin: SERVER_BASE_URL,
+      documentBaseUrl: `${SERVER_BASE_URL}/post/example/`,
+      gate: { quietMs: 400, deadlineMs: 10000 }
+    });
+
+    // <base> and the inline runtime script must precede every page script, so
+    // the shims wrap fetch/XHR before deferred/async code runs.
+    const headTags = Array.from(document.head.children, (el) => el.tagName);
+    expect(headTags.slice(0, 2)).toEqual(["BASE", "SCRIPT"]);
+    expect(document.head.children[1].textContent).toContain("__vivSettle");
+    // The loading attributes of the page's own scripts are preserved.
+    expect(document.querySelector("script[defer]")?.getAttribute("src")).toBe("/vendor/lib.js");
+    expect(document.querySelector("script[type=module]")?.getAttribute("src")).toBe("/vendor/module.js");
+    // The settle gate image lands at the end of the body.
+    expect(document.body.lastElementChild?.hasAttribute("data-vivliostyle-settle-gate")).toBe(true);
+  });
+
+  it("maps deferred and module scripts and runs the runtime ahead of them", async () => {
+    writeSite(tempDir);
+    const inputFile = writeArticle(tempDir, "deferred", {
+      js: [],
+      body: [
+        `<script defer src="${siteUrl(ASSETS.js)}"></script>`,
+        `<script type="module" src="${siteUrl(ASSETS.printJs)}"></script>`
+      ].join("")
+    });
+    const dumpDir = join(tempDir, "dump");
+
+    await runArgs([
+      "--input",
+      inputFile,
+      "--output",
+      join(tempDir, "out.pdf"),
+      "--asset-base",
+      `${SITE_ORIGIN}=${tempDir}`,
+      "--dump-html",
+      dumpDir
+    ]);
+
+    const rendered = readFileSync(join(dumpDir, "article.html"), "utf-8");
+    // Loading attributes survive the rewrite to the static server.
+    const { JSDOM } = await import("jsdom");
+    const rewritten = new JSDOM(rendered).window.document;
+    expect(rewritten.querySelector("script[defer]")?.getAttribute("src")).toBe(`${SERVER_BASE_URL}${ASSETS.js}`);
+    expect(rewritten.querySelector("script[type=module]")?.getAttribute("src")).toBe(`${SERVER_BASE_URL}${ASSETS.printJs}`);
+    // The inline runtime script precedes the page's own scripts, so its shims
+    // are in place when deferred/async code executes.
+    const runtimeIndex = rendered.indexOf("__vivSettle");
+    expect(runtimeIndex).toBeGreaterThan(-1);
+    expect(runtimeIndex).toBeLessThan(rendered.indexOf(`src="${SERVER_BASE_URL}${ASSETS.js}"`));
+    expect(rendered).toContain("data-vivliostyle-settle-gate");
   });
 
   it("startPreview serves the document and returns a viewer URL", async () => {

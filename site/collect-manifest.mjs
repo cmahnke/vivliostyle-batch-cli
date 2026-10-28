@@ -109,6 +109,16 @@ export const FIXTURES = [
     log: "wasm.log",
     probeName: "wasm",
     marker: /resized=\[1200x600/
+  },
+  {
+    id: "deferred",
+    title: "Deferred / async / module scripts",
+    lib: "d3 (defer + async + module)",
+    page: "09-deferred-async.html",
+    pdf: "deferred.pdf",
+    log: "deferred.log",
+    probeName: "deferred",
+    marker: /resized=\[1200x600/
   }
 ];
 
@@ -190,7 +200,9 @@ function copyInputs(outDir) {
   const inputsDir = join(outDir, "inputs");
   mkdirSync(inputsDir, { recursive: true });
   for (const name of readdirSync(PAGES_DIR)) {
-    if (!name.endsWith(".html")) continue;
+    // Pages and their support scripts (a `<script async src>` fixture needs
+    // its .js file next to the copied input).
+    if (!name.endsWith(".html") && !name.endsWith(".js")) continue;
     const rewritten = rewriteInputHtml(readFileSync(join(PAGES_DIR, name), "utf-8"));
     if (hasAbsoluteVendorUrl(rewritten)) {
       throw new Error(`Unresolved absolute vendor URL in ${name}`);

@@ -106,6 +106,9 @@ jobs:
           $CLI -i test/render-fixtures/pages/08-wasm.html -o "$OUT/wasm.pdf" \
             --static /tiles:$PWD/test/render-fixtures/tiles \
             --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/wasm.log"
+          $CLI -i test/render-fixtures/pages/09-deferred-async.html -o "$OUT/deferred.pdf" \
+            --static /vendor/d3:$PWD/node_modules/d3 \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/deferred.log"
       - name: Collect showcase manifest
         # Asserts every marker itself (upscale sizes, frame counts, PDF sizes).
         run: |

@@ -148,8 +148,13 @@ false`) and returns the viewer URL; build renders all pages to PDF.
   proof), `07-aframe.html` (embedded scene with mocked box + local mock GLB
   via `<a-asset-item>`, VR UI disabled), `08-wasm.html` (hand-assembled
   wasm module paints a canvas gradient via `instantiateStreaming`, with a
-  1.2s post-compile tail that regression-tests the default wait). All data
-  inline/mocked; no network.
+  1.2s post-compile tail that regression-tests the default wait),
+  `09-deferred-async.html` (d3 loaded with `defer`, an out-of-order
+  `<script async>` canvas paint, and an inline `type="module"` drawing
+  script; an early classic script converges their readiness signals, and
+  when the viewer executes the deferred/module scripts after the quiet
+  window the quiet gate carries the render — proving the pipeline renders
+  pages whose JS loads deferred/async). All data inline/mocked; no network.
 - Libraries are resolved from `node_modules` (`three`, `aframe`, `echarts`,
   `d3`, `openseadragon` devDependencies) via `/vendor/*` → `--static` mappings at
   test runtime; nothing is vendored into the repo. `docs/` is gitignored scratch

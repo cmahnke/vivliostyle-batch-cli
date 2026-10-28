@@ -51,6 +51,13 @@ describe("showcase input rewriting", () => {
     expect(rewritten.indexOf("importmap")).toBeLessThan(rewritten.indexOf('type="module"'));
   });
 
+  it("keeps defer and async attributes when rewriting fixture inputs", () => {
+    const html = ['<script defer src="/vendor/d3/dist/d3.min.js"></script>', '<script async src="./09-async-late.js"></script>'].join("\n");
+    const rewritten = rewriteInputHtml(html);
+    expect(rewritten).toContain('defer src="../vendor/d3/dist/d3.min.js"');
+    expect(rewritten).toContain('<script async src="./09-async-late.js">');
+  });
+
   it("every real fixture page rewrites cleanly", async () => {
     const { readFileSync } = await import("node:fs");
     for (const fixture of FIXTURES) {

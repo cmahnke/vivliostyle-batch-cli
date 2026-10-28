@@ -5,7 +5,8 @@
 
 /**
  * Synthetic render fixtures (iframe, three.js, echarts, d3, OpenSeadragon,
- * HiDPI canvas, A-Frame) plus the render hardening around them.
+ * HiDPI canvas, A-Frame, deferred/async/module script loading) plus the
+ * render hardening around them.
  *
  * Libraries are never vendored: fixtures reference `/vendor/*` virtual paths
  * that the test harness maps to `node_modules` at runtime (see VENDOR_MAP).
@@ -37,7 +38,9 @@ export const FIXTURE_PAGES = [
   "05-openseadragon.html",
   "06-canvas-hires.html",
   "07-aframe.html",
-  "08-wasm.html"
+  "08-wasm.html",
+  "09-deferred-async.html",
+  "09-async-late.js"
 ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
@@ -69,15 +72,37 @@ describe("render fixtures (mocked, offline)", () => {
       "05-openseadragon.html",
       "06-canvas-hires.html",
       "07-aframe.html",
-      "08-wasm.html"
+      "08-wasm.html",
+      "09-deferred-async.html"
     ]) {
       const html = readFileSync(join(PAGES_DIR, page), "utf-8");
       expect(html, `${page} sets __vivReady`).toContain("__vivReady");
       expect(html, `${page} tags fixture name`).toContain("__vivFixture");
     }
-    for (const page of ["02-threejs.html", "03-echarts.html", "04-d3.html", "06-canvas-hires.html", "07-aframe.html", "08-wasm.html"]) {
+    for (const page of [
+      "02-threejs.html",
+      "03-echarts.html",
+      "04-d3.html",
+      "06-canvas-hires.html",
+      "07-aframe.html",
+      "08-wasm.html",
+      "09-deferred-async.html"
+    ]) {
       expect(readFileSync(join(PAGES_DIR, page), "utf-8"), `${page} supports HiDPI redraw`).toContain("__vivResize");
     }
+  });
+
+  it("deferred fixture loads its code with defer, async and as a module", () => {
+    const html = readFileSync(join(PAGES_DIR, "09-deferred-async.html"), "utf-8");
+    expect(html).toContain('defer src="/vendor/d3/dist/d3.min.js"');
+    expect(html).toContain('async src="./09-async-late.js"');
+    expect(html).toContain('<script type="module">');
+    // Readiness converges the async script's paint and the module script's
+    // flag from an early classic script, so the E2E render proves the settle
+    // gate tolerates out-of-order and late script execution.
+    expect(html).toContain("__vivAsyncPainted");
+    expect(html).toContain("__vivD3Painted");
+    expect(readFileSync(join(PAGES_DIR, "09-async-late.js"), "utf-8")).toContain("__vivAsyncPainted = true");
   });
 
   it("mocked datasets are inline (no fetch of remote data)", () => {
