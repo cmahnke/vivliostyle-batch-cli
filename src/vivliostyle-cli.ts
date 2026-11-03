@@ -13,6 +13,9 @@ import log, { type LogLevelDesc } from "loglevel";
 import { VIEWER_PAGE_NAME, startStaticServer, type AssetBaseMapping, type SettleGate, type StaticMap } from "./server.js";
 import { buildViewerUrl, renderPdf, type ViewerParams } from "./render/pdf.js";
 import { resolveViewerLibDir } from "./render/viewer.js";
+import { loadDefaultIccProfile } from "./render/pdf-postprocess.js";
+import { extractMetadataFromDocument, extractMetadataFromManifest, parsePdfaLabel, parsePdfxLabel, resolveMetadata, type DocumentMetadata } from "./metadata.js";
+import type { PdfLabel } from "./render/xmp.js";
 
 type OutputFormat = "pdf";
 type LogLevel = "silent" | "info" | "verbose" | "debug";
@@ -23,7 +26,12 @@ type CliOptions = {
   output: string;
   title?: string;
   author?: string;
+  subject?: string;
+  keywords?: string;
   language?: string;
+  pdfa?: string;
+  pdfx?: string;
+  iccProfile?: string;
   static: string[];
   scripts: boolean;
   format: string;
@@ -1376,7 +1384,37 @@ function buildProgram(): Command {
     .option("-o, --output <file>", "Output file path", "output.pdf")
     .option("--title <title>", "Document title (overrides the one in the source)")
     .option("--author <author>", "Document author")
-    .option("--language <lang>", "Document language tag (e.g. en, de, ja)", "de")
+    .option("--subject <subject>", "Document subject (e.g. the page's description meta tag content)")
+    .option("--keywords <keywords>", "Document keywords, comma separated")
+    .option("--language <lang>", "Document language tag (e.g. en, de, ja). Taken from the document or manifest when omitted, falling back to 'de'")
+    .option(
+      "--pdfa <level>",
+      [
+        "Label the output PDF as PDF/A (ISO 19005): the XMP identification,",
+        "an OutputIntent with an embedded ICC profile (bundled sRGB unless",
+        "--icc-profile is given) and a file identifier are written.",
+        "Levels: 1a, 1b, 2a, 2b, 2u, 3a, 3b, 3u, 4.",
+        "This is a label only: the content is neither converted nor checked,",
+        "so conformance of the content is the author's responsibility."
+      ].join("\n      ")
+    )
+    .option(
+      "--pdfx <version>",
+      [
+        "Label the output PDF as PDF/X (ISO 15930): X-4 writes the",
+        "identification metadata as XMP, X-1a:2003 into the information",
+        "dictionary. Both embed the --icc-profile as the OutputIntent.",
+        "Same label-only semantics as --pdfa."
+      ].join("\n      ")
+    )
+    .option(
+      "--icc-profile <path>",
+      [
+        "ICC profile embedded as the PDF output intent, e.g. a print",
+        "provider's profile. Required for --pdfx; --pdfa defaults to the",
+        "bundled sRGB profile."
+      ].join("\n      ")
+    )
     .option(
       "--static <mapping>",
       [
@@ -1490,7 +1528,10 @@ function buildProgram(): Command {
         "  • A local HTTP server serves the document, its assets and the Vivliostyle viewer;",
         "  • the browser prints that page to PDF, so canvases and iframes stay real content.",
         "  • Collapsed <details> content is opened for the PDF; the preview keeps the page as it is.",
-        "  • --asset-base localBase is also a fallback root for CSS-referenced assets."
+        "  • --asset-base localBase is also a fallback root for CSS-referenced assets.",
+        "  • PDF metadata (--title/--author/--subject/--keywords/--language) overrides",
+        "  • values read from the document or the publication manifest; language falls",
+        "  • back to 'de'. --pdfa/--pdfx label the output, they do not convert content."
       ].join("\n")
     );
 }
@@ -1524,16 +1565,24 @@ export function parseArgs(argv: string[]): {
 // Build runner helper
 // ---------------------------------------------------------------------------
 
+/** Metadata fields the CLI layer resolves before handing them to the renderer. */
+type MetadataFieldName = "title" | "author" | "subject" | "keywords" | "language";
+
+/** ICC profile bytes with the name they get in the PDF's OutputIntent. */
+type IccProfile = { bytes: Uint8Array; name: string };
+
 type RenderParams = {
   documentUrl: string;
   viewerPageUrl: string;
   outputAbs: string;
-  metaFields: Partial<Record<"title" | "author" | "language", string>>;
+  metaFields: Partial<Record<MetadataFieldName, string>>;
   viewerParams: ViewerParams;
   timeoutMs?: number;
   waitForSettle: boolean;
   chromeExecutable?: string;
   canvasScale?: number;
+  pdfLabel?: PdfLabel;
+  iccProfile?: IccProfile;
 };
 
 async function runRender(params: RenderParams): Promise<void> {
@@ -1548,7 +1597,11 @@ async function runRender(params: RenderParams): Promise<void> {
     ...(params.canvasScale === undefined ? {} : { canvasScale: params.canvasScale }),
     ...(params.metaFields.title === undefined ? {} : { title: params.metaFields.title }),
     ...(params.metaFields.author === undefined ? {} : { author: params.metaFields.author }),
-    ...(params.metaFields.language === undefined ? {} : { language: params.metaFields.language })
+    ...(params.metaFields.subject === undefined ? {} : { subject: params.metaFields.subject }),
+    ...(params.metaFields.keywords === undefined ? {} : { keywords: params.metaFields.keywords }),
+    ...(params.metaFields.language === undefined ? {} : { language: params.metaFields.language }),
+    ...(params.pdfLabel === undefined ? {} : { pdfLabel: params.pdfLabel }),
+    ...(params.iccProfile === undefined ? {} : { iccProfile: params.iccProfile.bytes, iccProfileName: params.iccProfile.name })
   };
 
   log.trace("renderPdf request", request);
@@ -1613,6 +1666,65 @@ export function resolveEffectiveSettle(options: CliOptions, hasScripts: boolean)
   const quietRaw = options.quietMs === undefined ? 400 : Number.parseInt(options.quietMs, 10);
   if (!Number.isFinite(quietRaw) || quietRaw <= 0) throw new Error(`Invalid --quiet-ms: "${String(options.quietMs)}"`);
   return { gate: { quietMs: quietRaw, deadlineMs: AUTO_SETTLE_DEADLINE_MS }, autoArmed: true };
+}
+
+// ---------------------------------------------------------------------------
+// PDF metadata + standards labeling resolution
+// ---------------------------------------------------------------------------
+
+function describePdfLabel(label: PdfLabel): string {
+  return label.kind === "pdfa" ? `PDF/A-${label.part}${label.conformance ?? ""}` : `PDF/${label.version}`;
+}
+
+/**
+ * `--pdfa` / `--pdfx`: mutually exclusive standards labels for the output PDF.
+ */
+export function resolvePdfLabel(options: Pick<CliOptions, "pdfa" | "pdfx">): PdfLabel | undefined {
+  if (options.pdfa !== undefined && options.pdfx !== undefined) {
+    throw new Error("--pdfa and --pdfx are mutually exclusive — choose one standard label");
+  }
+  if (options.pdfa !== undefined) return parsePdfaLabel(options.pdfa);
+  if (options.pdfx !== undefined) return parsePdfxLabel(options.pdfx);
+  return undefined;
+}
+
+/**
+ * `--icc-profile <path>`: the profile the OutputIntent embeds. PDF/X always
+ * needs one; a PDF/A build without the flag embeds the bundled sRGB profile.
+ */
+export function resolveIccProfile(options: Pick<CliOptions, "iccProfile">, label: PdfLabel | undefined): IccProfile | undefined {
+  if (options.iccProfile !== undefined) {
+    const path = resolve(options.iccProfile);
+    if (!existsSync(path)) throw new Error(`--icc-profile file does not exist: ${path}`);
+    return { bytes: readFileSync(path), name: basename(path) };
+  }
+  if (label === undefined) return undefined;
+  if (label.kind === "pdfx") {
+    throw new Error(`--pdfx ${label.version} requires --icc-profile <path>: PDF/X output intents carry an ICC profile`);
+  }
+  return loadDefaultIccProfile();
+}
+
+/**
+ * Document metadata for the PDF: the flags override values taken from the
+ * input (HTML meta tags or a publication manifest); the language falls back
+ * to "de" when no source provides one.
+ */
+export function resolvePdfMetadata(
+  options: Pick<CliOptions, "title" | "author" | "subject" | "keywords" | "language">,
+  inputAbs: string,
+  htmlMode: boolean
+): DocumentMetadata & { language: string } {
+  const cliFields = pickDefinedStrings(options, ["title", "author", "subject", "keywords", "language"]) as DocumentMetadata;
+  let derived: DocumentMetadata | undefined;
+  if (htmlMode) {
+    derived = extractMetadataFromDocument(new JSDOM(readFileSync(inputAbs, "utf-8")).window.document);
+  } else if (/\.json$/i.test(inputAbs)) {
+    derived = extractMetadataFromManifest(readFileSync(inputAbs, "utf-8"));
+    if (derived === undefined) log.warn(`[metadata] ${inputAbs} is not a JSON publication manifest — no manifest metadata`);
+  }
+  log.trace("metadata (derived)", derived);
+  return resolveMetadata(cliFields, derived);
 }
 
 export async function execute(options: CliOptions, extraArgs: string[] = []): Promise<void> {
@@ -1716,7 +1828,13 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
   const extraConfig = parseExtraArgs(extraArgs);
   log.trace("extraConfig (parsed from -- args)", extraConfig);
 
-  const metaFields = pickDefinedStrings(options, ["title", "author", "language"]);
+  const metaFields = resolvePdfMetadata(options, inputAbs, htmlMode);
+  const pdfLabel = resolvePdfLabel(options);
+  if (pdfLabel !== undefined) log.info(`[pdf] labeling the output as ${describePdfLabel(pdfLabel)}`);
+  if (options.iccProfile !== undefined && pdfLabel === undefined) {
+    log.warn("[pdf] --icc-profile has no effect without --pdfa or --pdfx");
+  }
+  const iccProfile = resolveIccProfile(options, pdfLabel);
 
   const fetchMissing = options.fetchMissing === true || options.allowRemote === true;
   // The wait arms automatically on script-driven pages: without it, charts,
@@ -1827,7 +1945,9 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
         timeoutMs: typeof extraConfig.timeout === "number" ? extraConfig.timeout : undefined,
         waitForSettle: htmlOptions.settle != null,
         chromeExecutable: typeof extraConfig.executableBrowser === "string" ? extraConfig.executableBrowser : undefined,
-        canvasScale
+        canvasScale,
+        ...(pdfLabel === undefined ? {} : { pdfLabel }),
+        ...(iccProfile === undefined ? {} : { iccProfile })
       });
     } finally {
       htmlResource.cleanup();

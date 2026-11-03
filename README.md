@@ -10,6 +10,9 @@ It runs the [Vivliostyle viewer](https://www.npmjs.com/package/@vivliostyle/view
 - Preview documents in the browser
 - Render with the real browser engine, so canvas charts, WebGL scenes and cross-origin iframes end up in the PDF
 - Stay sharp past 96dpi: `--pixel-ratio` redraws JS-painted content at higher backing resolution
+- Stamp PDF metadata — title, author, subject, keywords, language — into the information dictionary and a matching XMP packet
+- Label the output as PDF/A or PDF/X with `--pdfa` / `--pdfx`, embedding an ICC output intent (`--icc-profile`, bundled sRGB default)
+- Metadata comes from the flags, the publication manifest or the document itself (`<title>`, `<meta>` tags)
 - Per-push showcase page (GitHub Pages) with the render fixtures next to their PDFs
 - Automatic detection and mapping of static assets from HTML (`<link>`, `<script>`, `<img>`, etc.)
 - Support for custom static asset mappings via `--static`
@@ -70,7 +73,12 @@ vivliostyle-cli -i index.html -o output.pdf -- --size A4 --viewer-param pixelRat
 | `-o, --output <file>`               | Output file path (default: `output.pdf`)                                                                                          |
 | `--title <title>`                   | Document title (overrides source)                                                                                                 |
 | `--author <author>`                 | Document author                                                                                                                   |
-| `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`) (default: `de`)                                                                     |
+| `--subject <subject>`               | Document subject (e.g. the page's description meta tag content)                                                                   |
+| `--keywords <keywords>`             | Document keywords, comma separated                                                                                                |
+| `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`); taken from the document or manifest when omitted, falling back to `de`             |
+| `--pdfa <level>`                    | Label the output as PDF/A: `1a`, `1b`, `2a`, `2b`, `2u`, `3a`, `3b`, `3u`, `4`. Embeds the sRGB output intent unless overridden    |
+| `--pdfx <version>`                  | Label the output as PDF/X: `X-4` or `X-1a:2003` (requires `--icc-profile`)                                                        |
+| `--icc-profile <path>`              | ICC profile embedded as the PDF output intent (required for `--pdfx`)                                                             |
 | `--static <mapping>`                | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)                                                          |
 | `--no-scripts`                      | Do not map `<script src>` tags as static assets                                                                                   |
 | `--asset-base <urlBase=localBase>`  | Map URLs starting with `urlBase` to files under `localBase` (repeatable)                                                          |
@@ -91,6 +99,8 @@ vivliostyle-cli -i index.html -o output.pdf -- --size A4 --viewer-param pixelRat
 
 ## Notes
 
+- **PDF metadata and standards labeling**: every build stamps a producer/creator identity (`vivliostyle-batch-cli`) and a document language. Title, author, subject, keywords and language resolve with this precedence: CLI flags → publication manifest (`.json` input) → the document itself (`<title>`, `<meta name="author">`/`dc.creator`, `<meta name="description">`, `<meta name="keywords">`, `html[lang]`) → language fallback `de`. The values land in both the PDF information dictionary and an XMP metadata stream kept consistent with it, plus the catalog `/Lang` entry. `--pdfa <level>` and `--pdfx <version>` additionally write the standards identification (XMP `pdfaid`/`pdfxid` properties, an OutputIntent with an embedded ICC profile and a file identifier). This is a **label, not a conversion**: the rendered content is neither converted nor checked, so conformance of the content is the author's responsibility — verify with veraPDF when it matters. Chrome's output carries transparency, so `--pdfa 2b` (or newer) is the realistic level; PDF/A-1b will usually fail validation.
+- The bundled `src/render/srgb.icc` is the ICC's `sRGB_v4_ICC_preference.icc`, redistributed unchanged under its license ("permission to use, copy and distribute this file for any purpose… provided that the file is not changed"), see <https://www.color.org/srgbprofiles.xalter>. Pass `--icc-profile` to embed a print provider's profile instead.
 - HTML input (`.html`/`.htm`) is auto-detected by file extension.
 - For HTML input, `<link href>` and `<script src>` tags are parsed and automatically mapped.
 - Everything else the document references (`<img src>`, `<source>`, `<iframe>`, `srcset`, …) is rewritten to the local static server as well, so only files from `--static` / `--asset-base` roots are ever loaded. Relative URLs on custom elements (`<a-asset-item>`, `<model-viewer>`, …) are resolved to absolute server URLs up front, since the viewer mangles the ones it does not understand.
@@ -135,6 +145,12 @@ Cross-origin iframes are printed by the browser as they appear on screen, so map
 ```bash
 # Build a PDF from an HTML file
 vivliostyle-cli -i index.html -o output.pdf
+
+# Build a PDF/A-2b-labeled file (metadata comes from the document itself)
+vivliostyle-cli -i index.html -o output.pdf --pdfa 2b --title "Report" --author "Jane Doe"
+
+# Label as PDF/X-4 with a print provider's ICC profile
+vivliostyle-cli -i index.html -o output.pdf --pdfx X-4 --icc-profile ISOcoated_v2_eci.icc
 
 # Preview an HTML file in browser
 vivliostyle-cli -i index.html --preview

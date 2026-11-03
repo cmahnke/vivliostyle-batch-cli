@@ -7,7 +7,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ASSETS, SITE_ORIGIN, articleHtml, siteUrl, writeArticle, writeRedirectStub, writeSite } from "./fixtures";
+
+/** Bundled sRGB profile used as the default OutputIntent for --pdfa. */
+const SRGB_ICC = fileURLToPath(new URL("../src/render/srgb.icc", import.meta.url));
 
 /** Port the mocked static server reports. */
 const SERVER_BASE_URL = "http://127.0.0.1:19876";
@@ -1518,5 +1522,126 @@ describe("vivliostyle-cli", () => {
 
     const warnings = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(warnings).toContain(`[fetch] Dropped unavailable remote reference: ${ASSETS.remoteEmbed}`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // PDF metadata + standards labeling
+  // ---------------------------------------------------------------------------
+
+  it("extracts document metadata when the flags do not set it", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(
+      inputFile,
+      [
+        `<!doctype html>`,
+        `<html lang="de"><head><title>Doc Title</title>`,
+        `<meta name="author" content="Doc Author">`,
+        `<meta name="description" content="Doc Subject">`,
+        `<meta name="keywords" content="doc, test">`,
+        `</head><body></body></html>`
+      ].join(""),
+      "utf-8"
+    );
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf")]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.title).toBe("Doc Title");
+    expect(request.author).toBe("Doc Author");
+    expect(request.subject).toBe("Doc Subject");
+    expect(request.keywords).toBe("doc, test");
+    expect(request.language).toBe("de");
+  });
+
+  it("lets the metadata flags override the document", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(
+      inputFile,
+      `<!doctype html><html lang="de"><head><title>Doc Title</title><meta name="author" content="Doc Author"></head><body></body></html>`,
+      "utf-8"
+    );
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf"), "--title", "Flag Title", "--language", "en"]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.title).toBe("Flag Title");
+    expect(request.author).toBe("Doc Author");
+    expect(request.language).toBe("en");
+  });
+
+  it("falls back to the language default when no source provides one", async () => {
+    const inputFile = join(tempDir, "plain.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf")]);
+
+    expect(renderMock.mock.calls[0][0].language).toBe("de");
+  });
+
+  it("passes --pdfa with the bundled sRGB profile to the renderer", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf"), "--pdfa", "2b"]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.pdfLabel).toEqual({ kind: "pdfa", part: "2", conformance: "b" });
+    expect(request.iccProfile).toBeInstanceOf(Uint8Array);
+    expect(request.iccProfileName).toBe("sRGB_v4_ICC_preference.icc");
+  });
+
+  it("accepts PDF/A-4 and honors a custom --icc-profile", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf"), "--pdfa", "4", "--icc-profile", SRGB_ICC]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.pdfLabel).toEqual({ kind: "pdfa", part: "4" });
+    expect(request.iccProfileName).toBe("srgb.icc");
+  });
+
+  it("passes --pdfx and --icc-profile through to the renderer", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf"), "--pdfx", "X-4", "--icc-profile", SRGB_ICC]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.pdfLabel).toEqual({ kind: "pdfx", version: "X-4" });
+    expect(request.iccProfile).toBeInstanceOf(Uint8Array);
+  });
+
+  it("rejects --pdfa together with --pdfx", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await expect(runArgs(["--input", inputFile, "--pdfa", "2b", "--pdfx", "X-4"])).rejects.toThrow(/mutually exclusive/);
+    expect(renderMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects --pdfx without --icc-profile", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await expect(runArgs(["--input", inputFile, "--pdfx", "X-1a:2003"])).rejects.toThrow(/--icc-profile/);
+    expect(renderMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an --icc-profile that does not exist", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await expect(runArgs(["--input", inputFile, "--pdfa", "2b", "--icc-profile", "/nonexistent/profile.icc"])).rejects.toThrow(
+      /does not exist/
+    );
+  });
+
+  it("rejects invalid --pdfa and --pdfx values", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await expect(runArgs(["--input", inputFile, "--pdfa", "2x"])).rejects.toThrow(/Invalid --pdfa level/);
+    await expect(runArgs(["--input", inputFile, "--pdfx", "X-5"])).rejects.toThrow(/Invalid --pdfx version/);
   });
 });

@@ -16,8 +16,12 @@ the machine.
 - Accepts an HTML file via `-i, --input` (auto-detected by `.html`/`.htm`
   extension); output defaults to `output.pdf` (`-o, --output`).
 - Output format is PDF only (`--format pdf`); other values are rejected.
-- Stamps PDF metadata: `--title`, `--author`, `--language` (default `de`);
-  producer/creator are `vivliostyle-batch-cli`.
+- Stamps PDF metadata. Title, author, subject, keywords and language resolve
+  with the precedence CLI flags (`--title`, `--author`, `--subject`,
+  `--keywords`, `--language`) > publication manifest (`.json` input) >
+  document (`<title>`, `<meta name="author">`/`dc.creator`/`dcterms.creator`,
+  `<meta name="description">`, `<meta name="keywords">`, `html[lang]`) >
+  language fallback `de`; producer/creator are always `vivliostyle-batch-cli`.
 - Two modes: `build` (default, writes PDF) and `preview` (`--preview` /
   `--mode preview`, serves the document and opens the viewer URL in a browser).
 
@@ -181,3 +185,37 @@ false`) and returns the viewer URL; build renders all pages to PDF.
   manifest, builds the site and uploads the Pages artifact; `deploy-site`
   (push-gated) publishes it on every `main` push. PRs run the render checks
   without deploying.
+
+## 12. PDF post-processing (metadata + standards labeling)
+
+Every build passes through `src/render/pdf-postprocess.ts` (MuPDF-based, same
+approach as vivliostyle-cli v11's post-processing). The step "labels, it does
+not convert": the rendered content is neither transformed nor checked, so
+content conformance is the author's responsibility (verify with veraPDF).
+
+- Information dictionary: title, author, subject, keywords (when given) plus
+  producer/creator `vivliostyle-batch-cli`, always. Creation/Modification
+  dates come from what the print backend (Skia) wrote; a missing ModDate
+  falls back to the CreationDate.
+- XMP packet (`src/render/xmp.ts`): packet-wrapper PIs Acrobat accepts,
+  Dublin Core title/creator(s)/description, `pdf:Keywords`, `pdf:Producer`,
+  `xmp:CreatorTool`, `xmp:CreateDate/ModifyDate/MetadataDate` (Skia's zone
+  kept, PDF-date strings reformatted per XMP Part 1), `xmpMM:DocumentID`
+  (fresh UUID per build) with version/rendition entries. Consistent with the
+  information dictionary.
+- Catalog `/Lang` for the resolved language (bumps the PDF version to 1.4).
+- `--pdfa <level>` (1a/1b/2a/2b/2u/3a/3b/3u/4): XMP `pdfaid:part` +
+  `pdfaid:conformance` (none for part 4), OutputIntent `S=GTS_PDFA1` with the
+  bundled sRGB profile (`src/render/srgb.icc`, ICC's
+  `sRGB_v4_ICC_preference.icc`, redistributed unchanged) unless
+  `--icc-profile <path>` overrides, and a file identifier `/ID` pair written
+  when missing.
+- `--pdfx <version>`: `X-4` identifies through XMP (`pdfxid:GTS_PDFXVersion`,
+  `pdf:Trapped`), `X-1a:2003` through the information dictionary
+  (`GTS_PDFXVersion`, `Trapped`, ModDate fallback). Both embed
+  `--icc-profile` as `S=GTS_PDFX` OutputIntent (required, no default
+  profile) and write the `/ID` pair. Mutually exclusive with `--pdfa`.
+- MuPDF handle discipline: `setMetaData` replaces the trailer dict, so every
+  mutation fetches fresh trailer/catalog/info handles right before it runs
+  (see `withTrailer`/`withCatalog`/`withInfo`); edits written through stale
+  handles vanish on save.

@@ -9,6 +9,10 @@
  * The viewer page is served by our own static server (see src/server.ts), so
  * the document's origin — and therefore the base URI of the scripts the page
  * runs — is the site we serve, not an internal viewer base.
+ *
+ * Printed pages run through the post-processing step (see
+ * src/render/pdf-postprocess.ts), which stamps the document metadata and
+ * applies the requested PDF/A or PDF/X labeling.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,6 +21,8 @@ import puppeteer from "puppeteer-core";
 import { PDFDocument } from "pdf-lib";
 import log from "loglevel";
 import { chromeArgs, resolveBrowserExecutable } from "./chrome.js";
+import { postProcessPdf } from "./pdf-postprocess.js";
+import type { PdfLabel } from "./xmp.js";
 
 export type ViewerParams = Record<string, string | number | boolean | undefined>;
 
@@ -46,6 +52,11 @@ export type RenderPdfRequest = {
   subject?: string;
   keywords?: string;
   language?: string;
+  /** Standards labeling applied to the printed PDF (PDF/A or PDF/X). */
+  pdfLabel?: PdfLabel;
+  /** ICC profile embedded as the OutputIntent; required whenever a label is set. */
+  iccProfile?: Uint8Array;
+  iccProfileName?: string;
   /** Hard limit for the whole render. */
   timeoutMs?: number;
   /** Wait for the page to report that it settled before printing. */
@@ -71,20 +82,19 @@ export type RenderPdfResult = {
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 
-/** Writes the PDF and stamps the metadata Vivliostyle would have written. */
-export async function writePdfWithMetadata(pdf: Uint8Array, meta: RenderPdfRequest): Promise<Uint8Array> {
-  const hasMetadata = meta.title !== undefined || meta.author !== undefined || meta.subject !== undefined || meta.language !== undefined;
-  if (!hasMetadata) return pdf;
+/** The wrapper owns the producer/creator entries of every PDF it prints. */
+const TOOL_IDENTITY = "vivliostyle-batch-cli";
 
-  const document = await PDFDocument.load(pdf, { updateMetadata: false });
-  if (meta.title !== undefined) document.setTitle(meta.title);
-  if (meta.author !== undefined) document.setAuthor(meta.author);
-  if (meta.subject !== undefined) document.setSubject(meta.subject);
-  if (meta.keywords !== undefined) document.setKeywords([meta.keywords]);
-  if (meta.language !== undefined) document.setLanguage(meta.language);
-  document.setProducer("vivliostyle-batch-cli");
-  document.setCreator("vivliostyle-batch-cli");
-  return document.save();
+function pdfMetadata(request: RenderPdfRequest) {
+  return {
+    ...(request.title === undefined ? {} : { title: request.title }),
+    ...(request.author === undefined ? {} : { author: request.author }),
+    ...(request.subject === undefined ? {} : { subject: request.subject }),
+    ...(request.keywords === undefined ? {} : { keywords: request.keywords }),
+    ...(request.language === undefined ? {} : { language: request.language }),
+    creator: TOOL_IDENTITY,
+    producer: TOOL_IDENTITY
+  };
 }
 
 type SettleState = { reason: string; at: number };
@@ -477,7 +487,11 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
       tagged: true
     });
 
-    const stamped = await writePdfWithMetadata(pdf, request);
+    const stamped = await postProcessPdf(pdf, {
+      metadata: pdfMetadata(request),
+      ...(request.pdfLabel === undefined ? {} : { label: request.pdfLabel }),
+      ...(request.iccProfile === undefined ? {} : { iccProfile: request.iccProfile, iccProfileName: request.iccProfileName })
+    });
     mkdirSync(dirname(request.output), { recursive: true });
     writeFileSync(request.output, stamped);
 
