@@ -14,7 +14,14 @@ import { VIEWER_PAGE_NAME, startStaticServer, type AssetBaseMapping, type Settle
 import { buildViewerUrl, renderPdf, type ViewerParams } from "./render/pdf.js";
 import { resolveViewerLibDir } from "./render/viewer.js";
 import { loadDefaultIccProfile } from "./render/pdf-postprocess.js";
-import { extractMetadataFromDocument, extractMetadataFromManifest, parsePdfaLabel, parsePdfxLabel, resolveMetadata, type DocumentMetadata } from "./metadata.js";
+import {
+  extractMetadataFromDocument,
+  extractMetadataFromManifest,
+  parsePdfaLabel,
+  parsePdfxLabel,
+  resolveMetadata,
+  type DocumentMetadata
+} from "./metadata.js";
 import type { PdfLabel } from "./render/xmp.js";
 
 type OutputFormat = "pdf";
@@ -1386,7 +1393,10 @@ function buildProgram(): Command {
     .option("--author <author>", "Document author")
     .option("--subject <subject>", "Document subject (e.g. the page's description meta tag content)")
     .option("--keywords <keywords>", "Document keywords, comma separated")
-    .option("--language <lang>", "Document language tag (e.g. en, de, ja). Taken from the document or manifest when omitted, falling back to 'de'")
+    .option(
+      "--language <lang>",
+      "Document language tag (e.g. en, de, ja). Taken from the document or manifest when omitted, falling back to 'de'"
+    )
     .option(
       "--pdfa <level>",
       [

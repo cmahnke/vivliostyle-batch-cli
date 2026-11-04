@@ -90,21 +90,12 @@ export function pdfDateToXmpDate(value: string): string | undefined {
 }
 
 function xmlEscape(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
 /** dc:title/dc:description: a language alternative with the x-default entry. */
 function languageAlternative(text: string): string {
-  return [
-    "<rdf:Alt>",
-    `  <rdf:li xml:lang="x-default">${xmlEscape(text)}</rdf:li>`,
-    "</rdf:Alt>"
-  ].join("\n      ");
+  return ["<rdf:Alt>", `  <rdf:li xml:lang="x-default">${xmlEscape(text)}</rdf:li>`, "</rdf:Alt>"].join("\n      ");
 }
 
 /** dc:creator: an ordered sequence; ";" separates individual authors. */

@@ -76,7 +76,7 @@ vivliostyle-cli -i index.html -o output.pdf -- --size A4 --viewer-param pixelRat
 | `--subject <subject>`               | Document subject (e.g. the page's description meta tag content)                                                                   |
 | `--keywords <keywords>`             | Document keywords, comma separated                                                                                                |
 | `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`); taken from the document or manifest when omitted, falling back to `de`             |
-| `--pdfa <level>`                    | Label the output as PDF/A: `1a`, `1b`, `2a`, `2b`, `2u`, `3a`, `3b`, `3u`, `4`. Embeds the sRGB output intent unless overridden    |
+| `--pdfa <level>`                    | Label the output as PDF/A: `1a`, `1b`, `2a`, `2b`, `2u`, `3a`, `3b`, `3u`, `4`. Embeds the sRGB output intent unless overridden   |
 | `--pdfx <version>`                  | Label the output as PDF/X: `X-4` or `X-1a:2003` (requires `--icc-profile`)                                                        |
 | `--icc-profile <path>`              | ICC profile embedded as the PDF output intent (required for `--pdfx`)                                                             |
 | `--static <mapping>`                | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)                                                          |

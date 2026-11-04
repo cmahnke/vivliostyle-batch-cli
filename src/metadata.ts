@@ -35,9 +35,7 @@ export function extractMetadataFromDocument(document: Document): DocumentMetadat
   const title = document.querySelector("title")?.textContent?.trim();
   const metaContent = (names: readonly string[]): string | undefined => {
     for (const name of names) {
-      const element =
-        document.querySelector(`meta[name="${name}" i]`) ??
-        document.querySelector(`meta[http-equiv="${name}" i]`);
+      const element = document.querySelector(`meta[name="${name}" i]`) ?? document.querySelector(`meta[http-equiv="${name}" i]`);
       const content = element?.getAttribute("content")?.trim();
       if (content !== undefined && content !== "") return content;
     }
@@ -48,7 +46,9 @@ export function extractMetadataFromDocument(document: Document): DocumentMetadat
     ...optional(metaContent(["author", "dc.creator", "dcterms.creator"]), (value) => ({ author: value })),
     ...optional(metaContent(["description", "dc.description"]), (value) => ({ subject: value })),
     ...optional(metaContent(["keywords"]), (value) => ({ keywords: value })),
-    ...optional(document.documentElement.getAttribute("lang")?.trim() || metaContent(["content-language"]), (value) => ({ language: value }))
+    ...optional(document.documentElement.getAttribute("lang")?.trim() || metaContent(["content-language"]), (value) => ({
+      language: value
+    }))
   };
 }
 

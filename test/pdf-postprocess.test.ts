@@ -90,7 +90,7 @@ describe("buildXmpPacket", () => {
     expect(packet).toContain("<rdf:li>Ada</rdf:li>");
     expect(packet).toContain("<rdf:li>Grace</rdf:li>");
     expect(packet).toContain("<dc:description>");
-    expect(packet).toContain("<rdf:li xml:lang=\"x-default\">About it</rdf:li>");
+    expect(packet).toContain('<rdf:li xml:lang="x-default">About it</rdf:li>');
     expect(packet).toContain("<pdf:Keywords>a, b</pdf:Keywords>");
     expect(packet).toContain("<pdf:Producer>vivliostyle-batch-cli</pdf:Producer>");
     expect(packet).toContain("<xmp:CreatorTool>vivliostyle-batch-cli</xmp:CreatorTool>");
@@ -180,7 +180,7 @@ describe("postProcessPdf", () => {
     const xmp = metadata.readStream().asString();
     expect(xmp).toContain("<?xpacket");
     expect(xmp).toContain("<dc:title>");
-    expect(xmp).toContain("<rdf:li xml:lang=\"x-default\">XMP Title</rdf:li>");
+    expect(xmp).toContain('<rdf:li xml:lang="x-default">XMP Title</rdf:li>');
     expect(xmp).toContain("<pdf:Producer>vivliostyle-batch-cli</pdf:Producer>");
     expect(xmp).toContain("<xmpMM:DocumentID>uuid:");
   });
@@ -356,9 +356,11 @@ describe("extractMetadataFromManifest", () => {
 
 describe("resolveMetadata", () => {
   it("lets the CLI flags win over the extracted values", () => {
-    expect(
-      resolveMetadata({ title: "CLI Title", language: "it" }, { title: "Doc Title", author: "Doc Author", language: "en" })
-    ).toEqual({ title: "CLI Title", author: "Doc Author", language: "it" });
+    expect(resolveMetadata({ title: "CLI Title", language: "it" }, { title: "Doc Title", author: "Doc Author", language: "en" })).toEqual({
+      title: "CLI Title",
+      author: "Doc Author",
+      language: "it"
+    });
   });
 
   it("fills fields the CLI does not set and defaults the language", () => {

@@ -67,7 +67,7 @@ The labels are written but nothing validates conformance. Follow-up:
   keeps the Skia 1.4 header (only `pdfaid:part 4` is written). If veraPDF
   flags it, bump `setMinimumPdfVersion(document, 20)` for part 4.
 - PDF/X-1a output-intent realism: print houses may require `GTS_PDFXVersion`
-  plus a *matching* output condition (`OutputConditionIdentifier` is written
+  plus a _matching_ output condition (`OutputConditionIdentifier` is written
   as `"Custom"` — same as vivliostyle-cli). Consider copying the ICC
   profile's registered name into the identifier when the profile carries
   one (`description` tag).
