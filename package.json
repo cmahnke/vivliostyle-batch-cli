@@ -26,7 +26,7 @@
     "jsdom": "^30.1.3",
     "loglevel": "^1.9.2",
     "mime-types": "^3.0.2",
-    "mupdf": "^1.28.0",
+    "mupdf": "^1.28.1",
     "pdf-lib": "^1.17.1",
     "puppeteer-core": "^25.16.0",
     "yargs": "^18.2.0"
@@ -50,7 +50,7 @@
     "openseadragon": "^6.1.1",
     "prettier": "^3.9.10",
     "rimraf": "^6.1.3",
-    "rollup": "^4.67.2",
+    "rollup": "^4.67.3",
     "rollup-plugin-dts": "^6.5.1",
     "three": "^0.187.0",
     "tslib": "^2.9.1",
