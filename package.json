@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@vivliostyle/viewer": "^2.46.0",
-    "commander": "^15.0.0",
+    "commander": "^15.1.0",
     "jsdom": "^31.0.0",
     "loglevel": "^1.9.2",
     "mime-types": "^3.0.2",
