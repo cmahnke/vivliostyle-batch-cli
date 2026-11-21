@@ -522,9 +522,7 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
       if (!vera.ran) {
         log.warn(`[pdf] verapdf skipped: ${vera.reason}`);
       } else if (vera.passed !== true) {
-        throw new Error(
-          `verapdf reports ${describeLabel(request.pdfLabel)} violations (exit ${vera.exitCode ?? "n/a"}):\n${vera.output}`
-        );
+        throw new Error(`verapdf reports ${describeLabel(request.pdfLabel)} violations (exit ${vera.exitCode ?? "n/a"}):\n${vera.output}`);
       } else {
         log.info(`[pdf] verapdf reports ${describeLabel(request.pdfLabel)} conformance: PASS`);
       }

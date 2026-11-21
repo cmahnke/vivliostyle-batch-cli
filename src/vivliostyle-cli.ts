@@ -1406,10 +1406,7 @@ function buildProgram(): Command {
       "--created <date>",
       "Document creation date (ISO 8601, e.g. 2024-11-18T00:00:00+01:00). Taken from the document's dcterms.created meta tag when omitted"
     )
-    .option(
-      "--modified <date>",
-      "Document modification date (ISO 8601). Taken from the document's dcterms.modified meta tag when omitted"
-    )
+    .option("--modified <date>", "Document modification date (ISO 8601). Taken from the document's dcterms.modified meta tag when omitted")
     .option(
       "--pdfa <level>",
       [
@@ -1763,7 +1760,15 @@ export function resolvePdfMetadata(
   inputAbs: string,
   htmlMode: boolean
 ): DocumentMetadata & { language: string } {
-  const cliFields = pickDefinedStrings(options, ["title", "author", "subject", "keywords", "language", "created", "modified"]) as DocumentMetadata;
+  const cliFields = pickDefinedStrings(options, [
+    "title",
+    "author",
+    "subject",
+    "keywords",
+    "language",
+    "created",
+    "modified"
+  ]) as DocumentMetadata;
   let derived: DocumentMetadata | undefined;
   if (htmlMode) {
     derived = extractMetadataFromDocument(new JSDOM(readFileSync(inputAbs, "utf-8")).window.document);

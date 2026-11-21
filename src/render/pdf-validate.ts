@@ -93,7 +93,10 @@ export function validateLabeledPdf(pdf: Uint8Array, label: PdfLabel): LabelViola
         if (!xmp.includes(`<pdfaid:part>${label.part}</pdfaid:part>`)) {
           violations.push({ check: "xmp-identification", detail: `XMP is missing <pdfaid:part>${label.part}` });
         }
-        if (label.conformance !== undefined && !xmp.includes(`<pdfaid:conformance>${label.conformance.toUpperCase()}</pdfaid:conformance>`)) {
+        if (
+          label.conformance !== undefined &&
+          !xmp.includes(`<pdfaid:conformance>${label.conformance.toUpperCase()}</pdfaid:conformance>`)
+        ) {
           violations.push({ check: "xmp-identification", detail: `XMP is missing <pdfaid:conformance>${label.conformance.toUpperCase()}` });
         }
       } else if (label.version === "X-4" && !xmp.includes("<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>")) {
@@ -168,7 +171,10 @@ export function validateLabeledPdf(pdf: Uint8Array, label: PdfLabel): LabelViola
         violations.push({ check: "metadata-consistency", detail: "information dictionary has a Title but the XMP packet lacks dc:title" });
       }
       if (info.get("Author").isString() && xmp !== "" && !xmp.includes("<dc:creator>")) {
-        violations.push({ check: "metadata-consistency", detail: "information dictionary has an Author but the XMP packet lacks dc:creator" });
+        violations.push({
+          check: "metadata-consistency",
+          detail: "information dictionary has an Author but the XMP packet lacks dc:creator"
+        });
       }
     }
 
