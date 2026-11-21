@@ -1156,8 +1156,12 @@ describe("vivliostyle-cli", () => {
     expect(rendered).toContain(`src="${SERVER_BASE_URL}${ASSETS.photo}"`);
     expect(rendered).toContain(`srcset="${SERVER_BASE_URL}${ASSETS.gallery} 1x, ${SERVER_BASE_URL}${ASSETS.thumb} 2x"`);
 
-    // the site origin never survives into the rendered document
-    expect(rendered).not.toContain(SITE_ORIGIN);
+    // the site origin never survives into the rendered subresources — the
+    // runtime script legitimately knows it (MAPPED_ORIGINS routes page-script
+    // fetches), so the check skips that injected script element
+    const runtimeScripts = [...rendered.matchAll(/<script>\(function\(\)\{[\s\S]*?<\/script>/g)].map((m) => m[0]);
+    const renderedWithoutRuntime = runtimeScripts.reduce((html, script) => html.replace(script, ""), rendered);
+    expect(renderedWithoutRuntime).not.toContain(SITE_ORIGIN);
   });
 
   it("reports every asset that is mapped but missing from the site", async () => {

@@ -22,6 +22,7 @@
   <body>
     <h1>echarts fixture (mocked bar+line)</h1>
     <div id="chart" class="script"></div>
+    <p id="chart-status">initialising mocked echarts…</p>
     <script>
       window.__vivFixture = "echarts";
       window.__vivReady = false;
@@ -39,6 +40,7 @@
       var el = document.getElementById("chart");
       var chart = echarts.init(el, null, { renderer: "canvas", devicePixelRatio: 1 });
       chart.setOption(option);
+      document.getElementById("chart-status").textContent = "mocked sales 42";
       window.__vivEchartsStatus = "painted";
       window.__vivResize = function (factor) {
         // HiDPI redraw: re-init at backing-store DPR, CSS size unchanged.

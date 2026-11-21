@@ -70,6 +70,7 @@
         scene.add(edges);
         renderer.render(scene, camera);
         window.__vivWebglStatus = "painted";
+        document.getElementById("status").textContent = "mocked box 42";
         // HiDPI hook: re-render at backing-store scale, CSS size unchanged.
         window.__vivResize = function (factor) {
           renderer.setPixelRatio(factor);

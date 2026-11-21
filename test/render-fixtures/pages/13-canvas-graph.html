@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: canvas graph from fetched data (rdf-graph pattern)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      rdf-graph {
+        display: block;
+        break-inside: avoid;
+      }
+      rdf-graph canvas {
+        width: 500px;
+        height: 300px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>canvas graph fixture (cytoscape pattern)</h1>
+    <rdf-graph
+      id="graph-1"
+      data-url="https://fixture.example.test/pages/13-graph-data.json"
+      class="script"
+      auto-execute
+    ></rdf-graph>
+    <p id="graph-status">waiting for graph data…</p>
+    <script>
+      window.__vivFixture = "canvas-graph";
+      window.__vivReady = false;
+      window.__vivResize = window.__vivResize ?? null;
+    </script>
+    <script src="./13-rdf-graph.js" type="module"></script>
+  </body>
+</html>

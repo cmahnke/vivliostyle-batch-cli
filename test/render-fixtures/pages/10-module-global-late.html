@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: late module global vs inline script (maps race)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      #map {
+        width: 400px;
+        height: 200px;
+        border: 1px solid #333;
+        break-inside: avoid;
+      }
+      #probe-log {
+        font-family: monospace;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>late module global fixture (OpenLayers pattern)</h1>
+    <div id="map" class="script"></div>
+    <p id="late-status">waiting for module global…</p>
+    <pre id="probe-log"></pre>
+    <script>
+      // The blog's maps partial (osm.html): an inline classic script that
+      // (a) records the state it observes in the viewer context — there
+      // document.readyState is already "complete", so a DOMContentLoaded
+      // listener registered here would NEVER fire — and (b) must therefore
+      // poll for the module-defined global instead of trusting the event.
+      window.__vivFixture = "module-global-late";
+      window.__vivReady = false;
+      window.__vivReadyStateAtExec = document.readyState;
+      window.__vivDomContentLoadedFired = false;
+      document.addEventListener("DOMContentLoaded", function () {
+        window.__vivDomContentLoadedFired = true;
+      });
+
+      var log = document.getElementById("probe-log");
+      var lines = [];
+      function note(line) {
+        lines.push(line);
+        log.textContent = lines.join("\n");
+      }
+      note("exec readyState=" + document.readyState);
+
+      // start() mirrors osm.html's post-fix shape: bounded retry poll, then
+      // init + updateSize with the RELATIVE data URL the module fetches.
+      // The cap has to outlast the settle gate's deadline: the module global
+      // only appears once vivliostyle drains its deferred scripts at the end
+      // of document processing, which the gate image unblocks.
+      var tries = 0;
+      var start = function () {
+        if (typeof window.initMapLate !== "function") {
+          if (++tries > 300) {
+            note("gave up waiting for initMapLate");
+            window.__vivReady = true;
+            return;
+          }
+          window.setTimeout(start, 100);
+          return;
+        }
+        window.mapInstance = window.initMapLate("map", "./10-map-data.json");
+        window.mapInstance.updateSize();
+        note("initMapLate ran after " + tries + " polls");
+      };
+      start();
+    </script>
+    <script type="module" src="./10-map-module.js"></script>
+  </body>
+</html>

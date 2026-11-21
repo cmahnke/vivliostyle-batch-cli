@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: lazy-loaded images</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      img {
+        width: 400px;
+        height: 300px;
+        display: block;
+        break-inside: avoid;
+      }
+      .spacer {
+        height: 600px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>lazy image fixture</h1>
+    <p>Below: three lazy images with spacer paragraphs in between.</p>
+    <img src="../tiles/osd/preview.png" loading="lazy" alt="lazy tile one" />
+    <p class="spacer">spacer one</p>
+    <img src="../tiles/osd/preview.png" loading="lazy" alt="lazy tile two" />
+    <p class="spacer">spacer two</p>
+    <img src="../tiles/osd/preview.png" loading="lazy" alt="lazy tile three" />
+    <script>
+      window.__vivFixture = "lazy-images";
+      window.__vivReady = false;
+      var images = Array.prototype.slice.call(document.querySelectorAll("img[loading=lazy]"));
+      window.__vivLazyCount = images.length;
+      function check() {
+        var done = images.every(function (img) {
+          return img.complete && img.naturalWidth > 0;
+        });
+        if (done) {
+          window.__vivLazyLoaded = images.filter(function (img) {
+            return img.complete && img.naturalWidth > 0;
+          }).length;
+          window.__vivReady = true;
+        }
+      }
+      images.forEach(function (img) {
+        img.addEventListener("load", check);
+        img.addEventListener("error", function () {
+          window.__vivLazyFailed = true;
+          window.__vivReady = true;
+        });
+      });
+      check();
+    </script>
+  </body>
+</html>

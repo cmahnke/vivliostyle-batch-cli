@@ -458,14 +458,32 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
     });
 
     if (request.waitForSettle === true) {
+      // The gate image keeps the viewer's document processing pending until
+      // the settle fires; only then does vivliostyle drain the deferred and
+      // module scripts it queued (end-of-document execution) and dispatch
+      // DOMContentLoaded. Pages that depend on those late globals flip
+      // __vivReady after the gate settled, so hold print briefly for them.
+      const POST_SETTLE_READY_GRACE_MS = 2000;
+      let settledAt = -1;
       const handle = await page.waitForFunction(
         () => {
           const settleState = (window as { __vivSettle?: { done?: boolean; reason?: string; at?: number } }).__vivSettle;
           // Pages with mocked/measured async work set __vivReady when painted;
           // Vivliostyle re-runs document scripts in the viewer context, so both
           // live on the same window the renderer polls here.
-          const ready = (window as { __vivReady?: boolean }).__vivReady === true;
-          if (ready) return { reason: "ready", at: 0 };
+          const readyState = (window as { __vivReady?: boolean }).__vivReady;
+          if (readyState === true) return { reason: "ready", at: 0 };
+          // An explicit not-ready beats a settled gate: quietness alone must
+          // not print the pre-paint DOM (async tails emit no network signal).
+          if (readyState === false) {
+            if (settleState?.done === true) {
+              if (settledAt < 0) settledAt = Date.now();
+              if (Date.now() - settledAt >= POST_SETTLE_READY_GRACE_MS) {
+                return { reason: settleState.reason ?? "settled", at: settleState.at ?? 0 };
+              }
+            }
+            return false;
+          }
           return settleState?.done === true ? { reason: settleState.reason ?? "settled", at: settleState.at ?? 0 } : false;
         },
         { polling: 200, timeout: timeoutMs }

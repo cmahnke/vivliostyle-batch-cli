@@ -53,7 +53,8 @@
         ctx.moveTo(0, CSS_H);
         ctx.lineTo(CSS_W, 0);
         ctx.stroke();
-        document.getElementById("hires-status").textContent = "scale " + factor + " → " + c.width + "x" + c.height;
+        document.getElementById("hires-status").textContent =
+          "mocked hires grid 42 (scale " + factor + " → " + c.width + "x" + c.height + ")";
       }
       draw(1);
       // CLI pre-print hook: redraw at backing-store scale, CSS size unchanged.

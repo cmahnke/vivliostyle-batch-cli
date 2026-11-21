@@ -72,6 +72,8 @@ export type HtmlRewriteOptions = {
   dumpDir?: string | null;
   /** Let the browser load references without a local file from the web. */
   fetchMissing?: boolean;
+  /** Origins mapped via --asset-base; page-script fetches route to the server. */
+  mappedOrigins?: string[];
   /** Delay pagination until the page's own async work finished. */
   settle?: SettleGate | null;
   /** Origin that page-script requests are routed to. */
@@ -155,6 +157,13 @@ export type RuntimeScriptOptions = {
   documentBaseUrl: string;
   gate: SettleGate | null;
   /**
+   * Origins mapped via --asset-base. Page scripts fetch data from these
+   * (the blog's sparql/graph components fetch their datasets from the site
+   * origin); routing them to the static server keeps builds deterministic
+   * instead of silently depending on the live site.
+   */
+  mappedOrigins?: string[];
+  /**
    * Open every `<details>` element. Vivliostyle loads the page's scripts itself
    * and only re-dispatches `DOMContentLoaded` on the window, so scripts that
    * wait for it on the document — the usual way to expand collapsible content —
@@ -207,12 +216,13 @@ export function buildSettleGateImage(origin: string): string {
 export function buildRuntimeScript(options: RuntimeScriptOptions): string {
   const { origin, documentBaseUrl, gate } = options;
   const expandDetails = options.expandDetails === true ? EXPAND_DETAILS_SNIPPET : "";
+  const mappedOrigins = JSON.stringify(options.mappedOrigins ?? []);
   // Vivliostyle paginates incrementally, so collapsed content has to be opened
   // again while it lays the document out, not just once up front.
   const expandDetailsTick = options.expandDetails === true ? "expandDetails(document);" : "";
 
   return `(function(){
-var ORIGIN=${JSON.stringify(origin)},BASE=${JSON.stringify(documentBaseUrl)};
+var ORIGIN=${JSON.stringify(origin)},BASE=${JSON.stringify(documentBaseUrl)},MAPPED_ORIGINS=${mappedOrigins};
 var QUIET=${gate?.quietMs ?? 400},DEADLINE=${gate?.deadlineMs ?? 10000},FRAME_GRACE=3000;
 var pending=0,frames=0,last=0,mutations=0,done=false,longtasks=0;
 // Force preserveDrawingBuffer on every WebGL context the page creates:
@@ -253,7 +263,13 @@ var state=window.__vivSettle={done:false,reason:null,at:0,pending:0,frames:0,mut
 function fix(u){
   if(typeof u!=="string"||u==="")return u;
   if(u.slice(0,2)==="//"||u.charAt(0)==="#"||u.charAt(0)==="?")return u;
-  if(/^[a-z][a-z0-9+.-]*:/i.test(u))return u;
+  if(/^[a-z][a-z0-9+.-]*:/i.test(u)){
+    try{
+      var mu=new URL(u);
+      if(MAPPED_ORIGINS.indexOf(mu.origin)>=0)return ORIGIN+mu.pathname+mu.search+mu.hash;
+    }catch(e){}
+    return u;
+  }
   return u.charAt(0)==="/"?ORIGIN+u:BASE+u;
 }
 
@@ -371,6 +387,10 @@ last=performance.now();
   // Deterministic pages (charts, WebGL, OSD fixtures) set __vivReady when
   // painted instead of making the gate guess from network quietness. Shader
   // compile and tile decode finish after the last fetch, so readiness wins.
+  // An explicit __vivReady=false holds the quiet path too: async tails (module
+  // imports, wasm, deferred timers) emit no network signal, so quietness alone
+  // would settle on the pre-paint DOM. The deadline above still bounds it.
+  if(window.__vivReady===false){setTimeout(check,50);return;}
   if(window.__vivReady===true&&pending===0&&frames===0){signal("ready");return;}
   if(pending===0&&frames===0&&now-last>=QUIET){signal("quiet");return;}
   setTimeout(check,50);
@@ -1079,7 +1099,13 @@ export function prepareInputHtmlForBuild(
     const origin = options.shimOrigin ?? serverBaseUrl;
     const documentBaseUrl = options.documentBaseUrl ?? `${origin}/`;
     // Only the PDF run expands `<details>`; the preview stays interactive.
-    injectRuntimeScriptInDom(document, { origin, documentBaseUrl, gate: options.settle ?? null, expandDetails: true });
+    injectRuntimeScriptInDom(document, {
+      origin,
+      documentBaseUrl,
+      gate: options.settle ?? null,
+      mappedOrigins: options.mappedOrigins ?? [],
+      expandDetails: true
+    });
     log.trace("prepareInputHtmlForBuild: injected runtime script", { origin, documentBaseUrl, gate: options.settle });
   }
 
@@ -1901,6 +1927,10 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
     fetchMissing,
     dumpDir: options.dumpHtml ?? null,
     settle,
+    // Page scripts fetch their data from the mapped origins (the blog's
+    // sparql/graph components); route those to the static server so builds
+    // stay deterministic instead of hitting the live site.
+    mappedOrigins: [...new Set(assetBases.map((base) => new URL(base.urlBase).origin))],
     ...(typeof extraConfig.css === "string" ? { css: extraConfig.css } : {}),
     ...(typeof extraConfig.userStyle === "string" ? { userStyle: extraConfig.userStyle } : {})
   };

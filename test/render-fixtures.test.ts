@@ -40,7 +40,17 @@ export const FIXTURE_PAGES = [
   "07-aframe.html",
   "08-wasm.html",
   "09-deferred-async.html",
-  "09-async-late.js"
+  "09-async-late.js",
+  "10-module-global-late.html",
+  "10-map-module.js",
+  "10-map-data.json",
+  "11-custom-element-data.html",
+  "11-data-grid.js",
+  "11-data.json",
+  "12-lazy-images.html",
+  "13-canvas-graph.html",
+  "13-rdf-graph.js",
+  "13-graph-data.json"
 ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
@@ -73,7 +83,11 @@ describe("render fixtures (mocked, offline)", () => {
       "06-canvas-hires.html",
       "07-aframe.html",
       "08-wasm.html",
-      "09-deferred-async.html"
+      "09-deferred-async.html",
+      "10-module-global-late.html",
+      "11-custom-element-data.html",
+      "12-lazy-images.html",
+      "13-canvas-graph.html"
     ]) {
       const html = readFileSync(join(PAGES_DIR, page), "utf-8");
       expect(html, `${page} sets __vivReady`).toContain("__vivReady");
@@ -86,10 +100,66 @@ describe("render fixtures (mocked, offline)", () => {
       "06-canvas-hires.html",
       "07-aframe.html",
       "08-wasm.html",
-      "09-deferred-async.html"
+      "09-deferred-async.html",
+      "13-canvas-graph.html"
     ]) {
       expect(readFileSync(join(PAGES_DIR, page), "utf-8"), `${page} supports HiDPI redraw`).toContain("__vivResize");
     }
+  });
+
+  it("module-global-late fixture mirrors the blog's maps race (osm.html + osm-map.ts)", () => {
+    const html = readFileSync(join(PAGES_DIR, "10-module-global-late.html"), "utf-8");
+    // The module is loaded via src (like osm-map.js), not inlined, so the
+    // asset server's deferred evaluation lands after the inline script ran.
+    expect(html).toContain('<script type="module" src="./10-map-module.js"></script>');
+    // The inline script records the viewer-context state: readyState is
+    // already "complete" when page scripts run, so a DOMContentLoaded
+    // listener registered by page code never fires — page scripts must poll
+    // for the module global instead (the maps post's initMap race).
+    expect(html).toContain("__vivReadyStateAtExec");
+    expect(html).toContain("__vivDomContentLoadedFired");
+    expect(html).toContain("typeof window.initMapLate");
+    expect(html).toContain('window.setTimeout(start, 100)');
+    // The data file is fetched by the module from a RELATIVE url (geojson).
+    expect(html).toContain('"./10-map-data.json"');
+    expect(readFileSync(join(PAGES_DIR, "10-map-module.js"), "utf-8")).toContain("fetch(dataUrl)");
+  });
+
+  it("custom element fixtures mirror the blog's sparql/graph components", () => {
+    for (const [page, script] of [
+      ["11-custom-element-data.html", "11-data-grid.js"],
+      ["13-canvas-graph.html", "13-rdf-graph.js"]
+    ] as const) {
+      const html = readFileSync(join(PAGES_DIR, page), "utf-8");
+      // The element is declared with data-url + auto-execute + class="script"
+      // (oxigraph-sparql / rdf-graph contract) and the code ships as a
+      // module via src.
+      expect(html, `${page} declares the element`).toMatch(/<(data-grid|rdf-graph)[^>]*data-url=/);
+      expect(html, `${page} auto-executes`).toContain("auto-execute");
+      expect(html, `${page} uses the script class`).toContain('class="script"');
+      expect(html, `${page} loads its module via src`).toContain(`<script src="./${script}" type="module"></script>`);
+    }
+    // The data urls are absolute and must map to the local fixture pages
+    // directory through --asset-base (the blog maps christianmahnke.de this
+    // way: absolute URL with the real site path inside it).
+    expect(readFileSync(join(PAGES_DIR, "11-custom-element-data.html"), "utf-8")).toContain(
+      'data-url="https://fixture.example.test/pages/11-data.json"'
+    );
+    expect(readFileSync(join(PAGES_DIR, "13-canvas-graph.html"), "utf-8")).toContain(
+      'data-url="https://fixture.example.test/pages/13-graph-data.json"'
+    );
+    // The sparql analog renders light-DOM div rows; the graph analog paints
+    // a canvas behind a custom element and exposes the redraw contract.
+    expect(readFileSync(join(PAGES_DIR, "11-data-grid.js"), "utf-8")).toContain('customElements.define("data-grid"');
+    expect(readFileSync(join(PAGES_DIR, "13-rdf-graph.js"), "utf-8")).toContain('customElements.define("rdf-graph"');
+    expect(readFileSync(join(PAGES_DIR, "13-rdf-graph.js"), "utf-8")).toContain("__vivResize");
+  });
+
+  it("lazy-image fixture mirrors the blog's loading=lazy images", () => {
+    const html = readFileSync(join(PAGES_DIR, "12-lazy-images.html"), "utf-8");
+    expect(html.match(/loading="lazy"/g)?.length).toBeGreaterThanOrEqual(3);
+    // Images come from the local tiles (no remote hosts).
+    expect(html).toContain('../tiles/osd/preview.png');
   });
 
   it("deferred fixture loads its code with defer, async and as a module", () => {
