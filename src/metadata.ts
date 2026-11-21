@@ -22,6 +22,10 @@ export type DocumentMetadata = {
   subject?: string;
   keywords?: string;
   language?: string;
+  /** ISO 8601 creation date (information dictionary and XMP CreateDate). */
+  created?: string;
+  /** ISO 8601 modification date (information dictionary and XMP ModifyDate). */
+  modified?: string;
 };
 
 /** Language tag assumed when no source provides one (project contract). */
@@ -29,7 +33,9 @@ export const DEFAULT_LANGUAGE = "de";
 
 /**
  * Extracts metadata from the input document: <title>, the usual
- * author/description/keywords meta tags and the document language.
+ * author/description/keywords meta tags, the creation/modification dates
+ * (dcterms, falling back to the plain date meta tag) and the document
+ * language.
  */
 export function extractMetadataFromDocument(document: Document): DocumentMetadata {
   const title = document.querySelector("title")?.textContent?.trim();
@@ -46,6 +52,8 @@ export function extractMetadataFromDocument(document: Document): DocumentMetadat
     ...optional(metaContent(["author", "dc.creator", "dcterms.creator"]), (value) => ({ author: value })),
     ...optional(metaContent(["description", "dc.description"]), (value) => ({ subject: value })),
     ...optional(metaContent(["keywords"]), (value) => ({ keywords: value })),
+    ...optional(metaContent(["dcterms.created", "dc.date", "date"]), (value) => ({ created: value })),
+    ...optional(metaContent(["dcterms.modified", "dc.date.modified", "modified"]), (value) => ({ modified: value })),
     ...optional(document.documentElement.getAttribute("lang")?.trim() || metaContent(["content-language"]), (value) => ({
       language: value
     }))

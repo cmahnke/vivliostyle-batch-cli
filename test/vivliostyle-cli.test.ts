@@ -1587,7 +1587,7 @@ describe("vivliostyle-cli", () => {
     const request = renderMock.mock.calls[0][0];
     expect(request.pdfLabel).toEqual({ kind: "pdfa", part: "2", conformance: "b" });
     expect(request.iccProfile).toBeInstanceOf(Uint8Array);
-    expect(request.iccProfileName).toBe("sRGB_v4_ICC_preference.icc");
+    expect(request.iccProfileName).toBe("sRGB IEC61966-2.1");
   });
 
   it("accepts PDF/A-4 and honors a custom --icc-profile", async () => {

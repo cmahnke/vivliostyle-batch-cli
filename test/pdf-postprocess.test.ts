@@ -7,8 +7,10 @@ import { describe, it, expect } from "vitest";
 import { PDFDocument } from "pdf-lib";
 import * as mupdf from "mupdf";
 import { JSDOM } from "jsdom";
-import { buildXmpPacket, pdfDateToXmpDate, toXmpDate } from "../src/render/xmp.js";
-import { loadDefaultIccProfile, postProcessPdf } from "../src/render/pdf-postprocess.js";
+import { buildXmpPacket, pdfDateToXmpDate, toXmpDate, xmpDateToPdfDate } from "../src/render/xmp.js";
+import { loadDefaultIccProfile, minimumVersionForLabel, parseExplicitDate, postProcessPdf } from "../src/render/pdf-postprocess.js";
+import { validateLabeledPdf } from "../src/render/pdf-validate.js";
+import { veraPdfFlavour } from "../src/render/verapdf.js";
 import {
   DEFAULT_LANGUAGE,
   extractMetadataFromDocument,
@@ -281,7 +283,7 @@ describe("postProcessPdf", () => {
 describe("loadDefaultIccProfile", () => {
   it("loads the bundled sRGB profile", () => {
     const { bytes, name } = loadDefaultIccProfile();
-    expect(name).toBe("sRGB_v4_ICC_preference.icc");
+    expect(name).toBe("sRGB IEC61966-2.1");
     // ICC signature "acsp" sits at offset 36.
     expect(bytes.byteLength).toBeGreaterThan(1000);
     expect(String.fromCharCode(bytes[36], bytes[37], bytes[38], bytes[39])).toBe("acsp");
@@ -395,5 +397,144 @@ describe("parsePdfxLabel", () => {
   it("rejects unsupported versions", () => {
     expect(() => parsePdfxLabel("X-5")).toThrow(/Invalid --pdfx version/);
     expect(() => parsePdfxLabel("X-1a:2001")).toThrow(/Invalid --pdfx version/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dates
+// ---------------------------------------------------------------------------
+
+describe("parseExplicitDate", () => {
+  it("accepts ISO 8601 with an offset", () => {
+    const parsed = parseExplicitDate("2024-11-18T00:00:00+01:00", "--created");
+    expect(parsed.pdfDate).toBe("D:20241118000000+01'00");
+    expect(parsed.xmpDate).toBe("2024-11-18T00:00:00+01:00");
+  });
+
+  it("accepts date-only values as UTC midnight", () => {
+    const parsed = parseExplicitDate("2024-11-18", "--created");
+    expect(parsed.pdfDate).toBe("D:20241118000000Z");
+    expect(parsed.xmpDate).toBe("2024-11-18T00:00:00Z");
+  });
+
+  it("accepts the PDF date form", () => {
+    const parsed = parseExplicitDate("D:20241118000000+01'00", "--created");
+    expect(parsed.xmpDate).toBe("2024-11-18T00:00:00+01:00");
+  });
+
+  it("round-trips the XMP and PDF date forms", () => {
+    expect(xmpDateToPdfDate("2024-11-18T10:30:00Z")).toBe("D:20241118103000Z");
+    expect(pdfDateToXmpDate("D:20241118103000Z")).toBe("2024-11-18T10:30:00Z");
+  });
+
+  it("rejects values that are no dates", () => {
+    expect(() => parseExplicitDate("next tuesday", "--created")).toThrow(/Invalid --created date/);
+  });
+});
+
+describe("document date extraction", () => {
+  it("reads dcterms.created and dcterms.modified meta tags", () => {
+    const dom = new JSDOM(`<!DOCTYPE html><html lang="de"><head>
+        <title>Date Document</title>
+        <meta name="dcterms.created" content="2024-11-18T00:00:00+01:00">
+        <meta name="dcterms.modified" content="2024-11-19T12:00:00+01:00">
+      </head><body></body></html>`);
+    const metadata = extractMetadataFromDocument(dom.window.document);
+    expect(metadata.created).toBe("2024-11-18T00:00:00+01:00");
+    expect(metadata.modified).toBe("2024-11-19T12:00:00+01:00");
+  });
+
+  it("falls back to the plain date meta tag for the creation date", () => {
+    const dom = new JSDOM(`<!DOCTYPE html><html lang="de"><head>
+        <title>Date Document</title>
+        <meta name="date" content="2024-11-18T00:00:00+01:00">
+      </head><body></body></html>`);
+    const metadata = extractMetadataFromDocument(dom.window.document);
+    expect(metadata.created).toBe("2024-11-18T00:00:00+01:00");
+    expect(metadata.modified).toBeUndefined();
+  });
+
+  it("stamps explicit dates into the information dictionary and XMP", async () => {
+    const stamped = await postProcessPdf(await minimalPdf(), {
+      metadata: {
+        created: "2024-11-18T00:00:00+01:00",
+        modified: "2024-11-19T12:00:00+01:00",
+        creator: "c",
+        producer: "p"
+      }
+    });
+    const { info, catalog } = openPdf(stamped);
+    expect(info.get("CreationDate").asString()).toBe("D:20241118000000+01'00");
+    expect(info.get("ModDate").asString()).toBe("D:20241119120000+01'00");
+    const xmp = catalog.get("Metadata").readStream().asString();
+    expect(xmp).toContain("<xmp:CreateDate>2024-11-18T00:00:00+01:00</xmp:CreateDate>");
+    expect(xmp).toContain("<xmp:ModifyDate>2024-11-19T12:00:00+01:00</xmp:ModifyDate>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Label version requirements
+// ---------------------------------------------------------------------------
+
+describe("minimumVersionForLabel", () => {
+  it("maps every label onto its required PDF version", () => {
+    expect(minimumVersionForLabel({ kind: "pdfa", part: "1", conformance: "b" })).toBe(14);
+    expect(minimumVersionForLabel({ kind: "pdfa", part: "2", conformance: "b" })).toBe(17);
+    expect(minimumVersionForLabel({ kind: "pdfa", part: "3", conformance: "u" })).toBe(17);
+    expect(minimumVersionForLabel({ kind: "pdfa", part: "4" })).toBe(20);
+    expect(minimumVersionForLabel({ kind: "pdfx", version: "X-4" })).toBe(16);
+    expect(minimumVersionForLabel({ kind: "pdfx", version: "X-1a:2003" })).toBe(14);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Built-in validation
+// ---------------------------------------------------------------------------
+
+describe("validateLabeledPdf", () => {
+  it("accepts properly labeled PDF/A-2b output", async () => {
+    const stamped = await postProcessPdf(await minimalPdf(), {
+      metadata: { title: "Archive", author: "Christian Mahnke", creator: "c", producer: "p" },
+      label: { kind: "pdfa", part: "2", conformance: "b" },
+      iccProfile: srgb.bytes,
+      iccProfileName: srgb.name
+    });
+    expect(validateLabeledPdf(stamped, { kind: "pdfa", part: "2", conformance: "b" })).toEqual([]);
+  });
+
+  it("reports the missing identification, OutputIntent and file identifier of unlabeled output", async () => {
+    const stamped = await postProcessPdf(await minimalPdf(), {
+      metadata: { creator: "c", producer: "p" }
+    });
+    const checks = validateLabeledPdf(stamped, { kind: "pdfa", part: "2", conformance: "b" }).map((v) => v.check);
+    expect(checks).toContain("xmp-identification");
+    expect(checks).toContain("output-intent");
+    expect(checks).toContain("file-identifier");
+  });
+
+  it("reports an unembedded font", async () => {
+    // pdf-lib writes a Type1 standard font without a FontFile entry, i.e. an
+    // unembedded font exactly like a print backend with a base-14 font would.
+    const libDocument = await PDFDocument.create();
+    const font = await libDocument.embedFont("Helvetica");
+    const page = libDocument.addPage([200, 300]);
+    page.drawText("Helvetica", { x: 10, y: 20, font, size: 12 });
+    const bytes = await libDocument.save();
+    expect(validateLabeledPdf(bytes, { kind: "pdfa", part: "2", conformance: "b" }).map((v) => v.check)).toContain("font-embedded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// veraPDF integration
+// ---------------------------------------------------------------------------
+
+describe("veraPdfFlavour", () => {
+  it("maps labels onto veraPDF flavours", () => {
+    expect(veraPdfFlavour({ kind: "pdfa", part: "1", conformance: "a" })).toBe("1a");
+    expect(veraPdfFlavour({ kind: "pdfa", part: "2", conformance: "b" })).toBe("2b");
+    expect(veraPdfFlavour({ kind: "pdfa", part: "2", conformance: "u" })).toBe("2u");
+    expect(veraPdfFlavour({ kind: "pdfa", part: "4" })).toBe("4");
+    expect(veraPdfFlavour({ kind: "pdfx", version: "X-4" })).toBe("X-4");
+    expect(veraPdfFlavour({ kind: "pdfx", version: "X-1a:2003" })).toBe("X-1a");
   });
 });

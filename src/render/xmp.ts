@@ -89,6 +89,18 @@ export function pdfDateToXmpDate(value: string): string | undefined {
   return `${year}-${month}-${day}T${hour}:${minute}:${second}${zone}`;
 }
 
+// The inverse of the PDF date form above: XMP Part 1, 8.2.1.2 date.
+const XMP_DATE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(Z|[+\-]\d{2}:\d{2})$/;
+
+/** Reformats an XMP date string as a PDF date; `undefined` when not one. */
+export function xmpDateToPdfDate(value: string): string | undefined {
+  const match = XMP_DATE.exec(value);
+  if (match === null) return undefined;
+  const [, year, month, day, hour, minute, second, zone] = match;
+  const offset = zone === "Z" ? "Z" : `${zone.slice(0, 3)}'${zone.slice(4, 6)}`;
+  return `D:${year}${month}${day}${hour}${minute}${second}${offset}`;
+}
+
 function xmlEscape(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }

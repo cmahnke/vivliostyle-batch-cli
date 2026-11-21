@@ -36,9 +36,14 @@ type CliOptions = {
   subject?: string;
   keywords?: string;
   language?: string;
+  created?: string;
+  modified?: string;
   pdfa?: string;
   pdfx?: string;
   iccProfile?: string;
+  /** Commander's negatable form of --no-validate. */
+  validate?: boolean;
+  verapdf?: boolean;
   static: string[];
   scripts: boolean;
   format: string;
@@ -1398,6 +1403,14 @@ function buildProgram(): Command {
       "Document language tag (e.g. en, de, ja). Taken from the document or manifest when omitted, falling back to 'de'"
     )
     .option(
+      "--created <date>",
+      "Document creation date (ISO 8601, e.g. 2024-11-18T00:00:00+01:00). Taken from the document's dcterms.created meta tag when omitted"
+    )
+    .option(
+      "--modified <date>",
+      "Document modification date (ISO 8601). Taken from the document's dcterms.modified meta tag when omitted"
+    )
+    .option(
       "--pdfa <level>",
       [
         "Label the output PDF as PDF/A (ISO 19005): the XMP identification,",
@@ -1415,6 +1428,21 @@ function buildProgram(): Command {
         "identification metadata as XMP, X-1a:2003 into the information",
         "dictionary. Both embed the --icc-profile as the OutputIntent.",
         "Same label-only semantics as --pdfa."
+      ].join("\n      ")
+    )
+    .option(
+      "--no-validate",
+      [
+        "Skip the built-in compliance checks run for --pdfa/--pdfx output:",
+        "PDF version of the labeled part, XMP identification, OutputIntent,",
+        "file identifier, embedded fonts and the absence of JavaScript."
+      ].join("\n      ")
+    )
+    .option(
+      "--verapdf",
+      [
+        "Additionally run the verapdf binary (must be on the PATH) against the",
+        "output and fail the build on full ISO rule-set violations."
       ].join("\n      ")
     )
     .option(
@@ -1539,9 +1567,11 @@ function buildProgram(): Command {
         "  • the browser prints that page to PDF, so canvases and iframes stay real content.",
         "  • Collapsed <details> content is opened for the PDF; the preview keeps the page as it is.",
         "  • --asset-base localBase is also a fallback root for CSS-referenced assets.",
-        "  • PDF metadata (--title/--author/--subject/--keywords/--language) overrides",
+        "  • PDF metadata (--title/--author/--subject/--keywords/--language/--created/--modified)",
         "  • values read from the document or the publication manifest; language falls",
-        "  • back to 'de'. --pdfa/--pdfx label the output, they do not convert content."
+        "  • back to 'de'. --pdfa/--pdfx label the output; the built-in validation",
+        "  • checks the practical subset (--no-validate skips it) and --verapdf runs",
+        "  • the full ISO rule set through the verapdf binary."
       ].join("\n")
     );
 }
@@ -1576,7 +1606,7 @@ export function parseArgs(argv: string[]): {
 // ---------------------------------------------------------------------------
 
 /** Metadata fields the CLI layer resolves before handing them to the renderer. */
-type MetadataFieldName = "title" | "author" | "subject" | "keywords" | "language";
+type MetadataFieldName = "title" | "author" | "subject" | "keywords" | "language" | "created" | "modified";
 
 /** ICC profile bytes with the name they get in the PDF's OutputIntent. */
 type IccProfile = { bytes: Uint8Array; name: string };
@@ -1593,6 +1623,10 @@ type RenderParams = {
   canvasScale?: number;
   pdfLabel?: PdfLabel;
   iccProfile?: IccProfile;
+  /** Run the built-in compliance checks for the label (default: on). */
+  validate: boolean;
+  /** Additionally run the verapdf binary against the output. */
+  verapdf?: boolean;
 };
 
 async function runRender(params: RenderParams): Promise<void> {
@@ -1610,8 +1644,12 @@ async function runRender(params: RenderParams): Promise<void> {
     ...(params.metaFields.subject === undefined ? {} : { subject: params.metaFields.subject }),
     ...(params.metaFields.keywords === undefined ? {} : { keywords: params.metaFields.keywords }),
     ...(params.metaFields.language === undefined ? {} : { language: params.metaFields.language }),
+    ...(params.metaFields.created === undefined ? {} : { created: params.metaFields.created }),
+    ...(params.metaFields.modified === undefined ? {} : { modified: params.metaFields.modified }),
     ...(params.pdfLabel === undefined ? {} : { pdfLabel: params.pdfLabel }),
-    ...(params.iccProfile === undefined ? {} : { iccProfile: params.iccProfile.bytes, iccProfileName: params.iccProfile.name })
+    ...(params.iccProfile === undefined ? {} : { iccProfile: params.iccProfile.bytes, iccProfileName: params.iccProfile.name }),
+    validate: params.validate,
+    ...(params.verapdf === undefined ? {} : { verapdf: params.verapdf })
   };
 
   log.trace("renderPdf request", request);
@@ -1721,11 +1759,11 @@ export function resolveIccProfile(options: Pick<CliOptions, "iccProfile">, label
  * to "de" when no source provides one.
  */
 export function resolvePdfMetadata(
-  options: Pick<CliOptions, "title" | "author" | "subject" | "keywords" | "language">,
+  options: Pick<CliOptions, "title" | "author" | "subject" | "keywords" | "language" | "created" | "modified">,
   inputAbs: string,
   htmlMode: boolean
 ): DocumentMetadata & { language: string } {
-  const cliFields = pickDefinedStrings(options, ["title", "author", "subject", "keywords", "language"]) as DocumentMetadata;
+  const cliFields = pickDefinedStrings(options, ["title", "author", "subject", "keywords", "language", "created", "modified"]) as DocumentMetadata;
   let derived: DocumentMetadata | undefined;
   if (htmlMode) {
     derived = extractMetadataFromDocument(new JSDOM(readFileSync(inputAbs, "utf-8")).window.document);
@@ -1957,7 +1995,9 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
         chromeExecutable: typeof extraConfig.executableBrowser === "string" ? extraConfig.executableBrowser : undefined,
         canvasScale,
         ...(pdfLabel === undefined ? {} : { pdfLabel }),
-        ...(iccProfile === undefined ? {} : { iccProfile })
+        ...(iccProfile === undefined ? {} : { iccProfile }),
+        validate: options.validate !== false,
+        ...(options.verapdf === true ? { verapdf: true } : {})
       });
     } finally {
       htmlResource.cleanup();

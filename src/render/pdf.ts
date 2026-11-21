@@ -22,6 +22,8 @@ import { PDFDocument } from "pdf-lib";
 import log from "loglevel";
 import { chromeArgs, resolveBrowserExecutable } from "./chrome.js";
 import { postProcessPdf } from "./pdf-postprocess.js";
+import { describeLabel, validateLabeledPdf } from "./pdf-validate.js";
+import { runVeraPdf } from "./verapdf.js";
 import type { PdfLabel } from "./xmp.js";
 
 export type ViewerParams = Record<string, string | number | boolean | undefined>;
@@ -52,8 +54,16 @@ export type RenderPdfRequest = {
   subject?: string;
   keywords?: string;
   language?: string;
+  /** ISO 8601 creation date; overrides the one the print backend wrote. */
+  created?: string;
+  /** ISO 8601 modification date; overrides the one the print backend wrote. */
+  modified?: string;
   /** Standards labeling applied to the printed PDF (PDF/A or PDF/X). */
   pdfLabel?: PdfLabel;
+  /** Run the built-in compliance checks for the label (default: on). */
+  validate?: boolean;
+  /** Additionally run the verapdf binary against the output. */
+  verapdf?: boolean;
   /** ICC profile embedded as the OutputIntent; required whenever a label is set. */
   iccProfile?: Uint8Array;
   iccProfileName?: string;
@@ -92,6 +102,8 @@ function pdfMetadata(request: RenderPdfRequest) {
     ...(request.subject === undefined ? {} : { subject: request.subject }),
     ...(request.keywords === undefined ? {} : { keywords: request.keywords }),
     ...(request.language === undefined ? {} : { language: request.language }),
+    ...(request.created === undefined ? {} : { created: request.created }),
+    ...(request.modified === undefined ? {} : { modified: request.modified }),
     creator: TOOL_IDENTITY,
     producer: TOOL_IDENTITY
   };
@@ -492,8 +504,31 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
       ...(request.pdfLabel === undefined ? {} : { label: request.pdfLabel }),
       ...(request.iccProfile === undefined ? {} : { iccProfile: request.iccProfile, iccProfileName: request.iccProfileName })
     });
+    if (request.pdfLabel !== undefined && request.validate !== false) {
+      const violations = validateLabeledPdf(stamped, request.pdfLabel);
+      if (violations.length > 0) {
+        throw new Error(
+          `${describeLabel(request.pdfLabel)} label failed validation, refusing to write a non-conforming output:\n` +
+            violations.map((violation) => `  - ${violation.check}: ${violation.detail}`).join("\n")
+        );
+      }
+      log.info(`[pdf] built-in ${describeLabel(request.pdfLabel)} validation passed`);
+    }
     mkdirSync(dirname(request.output), { recursive: true });
     writeFileSync(request.output, stamped);
+
+    if (request.verapdf === true && request.pdfLabel !== undefined) {
+      const vera = runVeraPdf(request.output, request.pdfLabel);
+      if (!vera.ran) {
+        log.warn(`[pdf] verapdf skipped: ${vera.reason}`);
+      } else if (vera.passed !== true) {
+        throw new Error(
+          `verapdf reports ${describeLabel(request.pdfLabel)} violations (exit ${vera.exitCode ?? "n/a"}):\n${vera.output}`
+        );
+      } else {
+        log.info(`[pdf] verapdf reports ${describeLabel(request.pdfLabel)} conformance: PASS`);
+      }
+    }
 
     const pageCount = await PDFDocument.load(stamped).then((doc) => doc.getPageCount());
 
