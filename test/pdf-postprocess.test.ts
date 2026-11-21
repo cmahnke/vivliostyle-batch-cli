@@ -10,7 +10,7 @@ import { JSDOM } from "jsdom";
 import { buildXmpPacket, pdfDateToXmpDate, toXmpDate, xmpDateToPdfDate } from "../src/render/xmp.js";
 import { loadDefaultIccProfile, minimumVersionForLabel, parseExplicitDate, postProcessPdf } from "../src/render/pdf-postprocess.js";
 import { validateLabeledPdf } from "../src/render/pdf-validate.js";
-import { veraPdfFlavour } from "../src/render/verapdf.js";
+import { runVeraPdf, veraPdfFlavour } from "../src/render/verapdf.js";
 import {
   DEFAULT_LANGUAGE,
   extractMetadataFromDocument,
@@ -536,5 +536,19 @@ describe("veraPdfFlavour", () => {
     expect(veraPdfFlavour({ kind: "pdfa", part: "4" })).toBe("4");
     expect(veraPdfFlavour({ kind: "pdfx", version: "X-4" })).toBe("X-4");
     expect(veraPdfFlavour({ kind: "pdfx", version: "X-1a:2003" })).toBe("X-1a");
+  });
+});
+
+describe("runVeraPdf", () => {
+  it("reports a missing binary instead of throwing", () => {
+    const previousPath = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      const result = runVeraPdf("/tmp/does-not-matter.pdf", { kind: "pdfa", part: "2", conformance: "b" });
+      expect(result.ran).toBe(false);
+      expect(result.reason).toBe("verapdf binary not found on PATH");
+    } finally {
+      process.env.PATH = previousPath;
+    }
   });
 });

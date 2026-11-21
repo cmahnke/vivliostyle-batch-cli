@@ -538,7 +538,10 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
     if (request.verapdf === true && request.pdfLabel !== undefined) {
       const vera = runVeraPdf(request.output, request.pdfLabel);
       if (!vera.ran) {
-        log.warn(`[pdf] verapdf skipped: ${vera.reason}`);
+        throw new Error(
+          `--verapdf was requested, but veraPDF could not be run: ${vera.reason}. ` +
+            "Install veraPDF (https://verapdf.org/, requires Java) or drop --verapdf."
+        );
       } else if (vera.passed !== true) {
         throw new Error(`verapdf reports ${describeLabel(request.pdfLabel)} violations (exit ${vera.exitCode ?? "n/a"}):\n${vera.output}`);
       } else {

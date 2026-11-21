@@ -1913,6 +1913,9 @@ export async function execute(options: CliOptions, extraArgs: string[] = []): Pr
   if (options.iccProfile !== undefined && pdfLabel === undefined) {
     log.warn("[pdf] --icc-profile has no effect without --pdfa or --pdfx");
   }
+  if (options.verapdf === true && pdfLabel === undefined) {
+    log.warn("[pdf] --verapdf has no effect without --pdfa or --pdfx");
+  }
   const iccProfile = resolveIccProfile(options, pdfLabel);
 
   const fetchMissing = options.fetchMissing === true || options.allowRemote === true;
