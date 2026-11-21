@@ -9,7 +9,29 @@ on:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
 jobs:
+  test:
+    # Gate: lint, format, tests and build must pass before anything is
+    # published — lint.yml only runs on branch pushes/PRs, not on tags.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: ".nvmrc"
+          registry-url: "https://npm.pkg.github.com"
+      - uses: ./.github/actions/setup-verapdf
+      - name: Test
+        run: |
+          npm i
+          npm run lint
+          npm run format
+          npm run test
+          npm run build
+
   publish_gpr:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -45,6 +67,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish_npm:
+    needs: test
     permissions:
       contents: write
       packages: write
