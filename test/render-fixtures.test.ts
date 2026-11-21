@@ -119,7 +119,7 @@ describe("render fixtures (mocked, offline)", () => {
     expect(html).toContain("__vivReadyStateAtExec");
     expect(html).toContain("__vivDomContentLoadedFired");
     expect(html).toContain("typeof window.initMapLate");
-    expect(html).toContain('window.setTimeout(start, 100)');
+    expect(html).toContain("window.setTimeout(start, 100)");
     // The data file is fetched by the module from a RELATIVE url (geojson).
     expect(html).toContain('"./10-map-data.json"');
     expect(readFileSync(join(PAGES_DIR, "10-map-module.js"), "utf-8")).toContain("fetch(dataUrl)");
@@ -159,7 +159,7 @@ describe("render fixtures (mocked, offline)", () => {
     const html = readFileSync(join(PAGES_DIR, "12-lazy-images.html"), "utf-8");
     expect(html.match(/loading="lazy"/g)?.length).toBeGreaterThanOrEqual(3);
     // Images come from the local tiles (no remote hosts).
-    expect(html).toContain('../tiles/osd/preview.png');
+    expect(html).toContain("../tiles/osd/preview.png");
   });
 
   it("deferred fixture loads its code with defer, async and as a module", () => {
