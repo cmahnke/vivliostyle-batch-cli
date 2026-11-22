@@ -58,6 +58,14 @@ describe("showcase input rewriting", () => {
     expect(rewritten).toContain('<script async src="./09-async-late.js">');
   });
 
+  it("rewrites the remote-iframe fixture origin to a relative path", async () => {
+    const { readFileSync } = await import("node:fs");
+    const html = readFileSync(join(resolve(__dirname, ".."), "test/render-fixtures/pages/14-remote-iframe.html"), "utf-8");
+    const rewritten = rewriteInputHtml(html);
+    expect(rewritten).not.toContain("fixture.example.test");
+    expect(rewritten).toContain('src="14-remote-child.html"');
+  });
+
   it("every real fixture page rewrites cleanly", async () => {
     const { readFileSync } = await import("node:fs");
     for (const fixture of FIXTURES) {

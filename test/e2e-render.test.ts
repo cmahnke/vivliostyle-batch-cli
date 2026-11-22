@@ -238,6 +238,16 @@ describe("e2e render (real Chrome)", () => {
     pdf.document.destroy();
   }, 120_000);
 
+  it("remote iframe (asset-base mapped) integrates its content into the PDF", async () => {
+    const output = await renderPages("14-remote-iframe.html");
+    const pdf = openPdf(output);
+    // The iframe src is an absolute fixture url; the rewrite maps it onto
+    // the static server so the child document loads and prints.
+    expect(pdf.text(0)).toContain("remote child mock 42");
+    expect(nonWhiteShare(pdf.pixmap(0))).toBeGreaterThan(0.01);
+    pdf.document.destroy();
+  }, 120_000);
+
   it("PDF/A-2b labeled output passes the built-in validation and verapdf", async () => {
     const output = await renderPages("06-canvas-hires.html", ["--pdfa", "2b", "--verapdf"]);
     // The build itself already validated (built-in checks + verapdf via

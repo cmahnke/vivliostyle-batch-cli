@@ -468,21 +468,30 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
       // DOMContentLoaded. Pages that depend on those late globals flip
       // __vivReady after the gate settled, so hold print briefly for them.
       const POST_SETTLE_READY_GRACE_MS = 2000;
-      let settledAt = -1;
       const handle = await page.waitForFunction(
-        () => {
-          const settleState = (window as { __vivSettle?: { done?: boolean; reason?: string; at?: number } }).__vivSettle;
+        // The predicate is serialized into the page context: no Node-side
+        // closure variables survive (a reference throws ReferenceError and
+        // leaves the poller pending forever), so the grace constant is passed
+        // as an argument and the "settled but not ready" anchor lives on
+        // window — every poll is a fresh evaluation.
+        (graceMs: number) => {
+          const win = window as {
+            __vivSettle?: { done?: boolean; reason?: string; at?: number };
+            __vivReady?: boolean;
+            __vivSettledNotReadyAt?: number;
+          };
+          const settleState = win.__vivSettle;
           // Pages with mocked/measured async work set __vivReady when painted;
           // Vivliostyle re-runs document scripts in the viewer context, so both
           // live on the same window the renderer polls here.
-          const readyState = (window as { __vivReady?: boolean }).__vivReady;
+          const readyState = win.__vivReady;
           if (readyState === true) return { reason: "ready", at: 0 };
           // An explicit not-ready beats a settled gate: quietness alone must
           // not print the pre-paint DOM (async tails emit no network signal).
           if (readyState === false) {
             if (settleState?.done === true) {
-              if (settledAt < 0) settledAt = Date.now();
-              if (Date.now() - settledAt >= POST_SETTLE_READY_GRACE_MS) {
+              if (win.__vivSettledNotReadyAt === undefined) win.__vivSettledNotReadyAt = Date.now();
+              if (Date.now() - win.__vivSettledNotReadyAt >= graceMs) {
                 return { reason: settleState.reason ?? "settled", at: settleState.at ?? 0 };
               }
             }
@@ -490,7 +499,8 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
           }
           return settleState?.done === true ? { reason: settleState.reason ?? "settled", at: settleState.at ?? 0 } : false;
         },
-        { polling: 200, timeout: timeoutMs }
+        { polling: 200, timeout: timeoutMs },
+        POST_SETTLE_READY_GRACE_MS
       );
       const state = (await handle.jsonValue()) as SettleState;
 

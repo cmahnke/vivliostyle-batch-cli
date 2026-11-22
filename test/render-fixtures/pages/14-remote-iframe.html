@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: remote iframe (asset-base mapped)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+      iframe {
+        width: 500px;
+        height: 200px;
+        border: 1px solid #333;
+        break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>remote iframe fixture (google maps embed pattern)</h1>
+    <p>Below: an iframe whose src is an absolute url that maps to a local file through --asset-base.</p>
+    <!-- data-url pattern mirrors the blog: absolute https url → mapped to the
+         local pages directory via the asset base, exactly like the google
+         maps embed iframes in the posts. -->
+    <iframe src="https://fixture.example.test/pages/14-remote-child.html" title="remote mock"></iframe>
+    <script>
+      window.__vivFixture = "remote-iframe";
+      window.__vivReady = false;
+      var frame = document.querySelector("iframe");
+      frame.addEventListener("load", function () {
+        window.__vivReady = true;
+      });
+      setTimeout(function () {
+        window.__vivReady = true;
+      }, 5000);
+    </script>
+  </body>
+</html>

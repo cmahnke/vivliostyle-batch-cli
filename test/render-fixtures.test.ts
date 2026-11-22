@@ -50,7 +50,9 @@ export const FIXTURE_PAGES = [
   "12-lazy-images.html",
   "13-canvas-graph.html",
   "13-rdf-graph.js",
-  "13-graph-data.json"
+  "13-graph-data.json",
+  "14-remote-iframe.html",
+  "14-remote-child.html"
 ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
@@ -87,7 +89,8 @@ describe("render fixtures (mocked, offline)", () => {
       "10-module-global-late.html",
       "11-custom-element-data.html",
       "12-lazy-images.html",
-      "13-canvas-graph.html"
+      "13-canvas-graph.html",
+      "14-remote-iframe.html"
     ]) {
       const html = readFileSync(join(PAGES_DIR, page), "utf-8");
       expect(html, `${page} sets __vivReady`).toContain("__vivReady");
@@ -160,6 +163,14 @@ describe("render fixtures (mocked, offline)", () => {
     expect(html.match(/loading="lazy"/g)?.length).toBeGreaterThanOrEqual(3);
     // Images come from the local tiles (no remote hosts).
     expect(html).toContain("../tiles/osd/preview.png");
+  });
+
+  it("remote-iframe fixture mirrors the blog's google maps embed pattern", () => {
+    const html = readFileSync(join(PAGES_DIR, "14-remote-iframe.html"), "utf-8");
+    // The iframe src is an ABSOLUTE url — mapped to a local file through
+    // --asset-base exactly like the blog's google maps embed iframes.
+    expect(html).toContain('src="https://fixture.example.test/pages/14-remote-child.html"');
+    expect(readFileSync(join(PAGES_DIR, "14-remote-child.html"), "utf-8")).toContain("remote child mock 42");
   });
 
   it("deferred fixture loads its code with defer, async and as a module", () => {

@@ -119,6 +119,56 @@ export const FIXTURES = [
     log: "deferred.log",
     probeName: "deferred",
     marker: /resized=\[1200x600/
+  },
+  {
+    id: "module-global-late",
+    title: "Late module global vs inline script (maps race)",
+    lib: "es module + inline poller",
+    page: "10-module-global-late.html",
+    pdf: "module-global-late.pdf",
+    log: "module-global-late.log",
+    probeName: "module-global-late",
+    marker: /Document created/
+  },
+  {
+    id: "custom-element-data",
+    title: "Custom element with data fetch",
+    lib: "custom element + fetch (oxigraph pattern)",
+    page: "11-custom-element-data.html",
+    pdf: "custom-element-data.pdf",
+    log: "custom-element-data.log",
+    probeName: "custom-element-data",
+    marker: /Document created/
+  },
+  {
+    id: "lazy-images",
+    title: "Lazy-loaded images",
+    lib: "loading=lazy",
+    page: "12-lazy-images.html",
+    pdf: "lazy-images.pdf",
+    log: "lazy-images.log",
+    probeName: "lazy-images",
+    marker: /Document created/
+  },
+  {
+    id: "canvas-graph",
+    title: "Canvas graph from fetched data",
+    lib: "custom element + canvas (cytoscape pattern)",
+    page: "13-canvas-graph.html",
+    pdf: "canvas-graph.pdf",
+    log: "canvas-graph.log",
+    probeName: "canvas-graph",
+    marker: /resized=/
+  },
+  {
+    id: "remote-iframe",
+    title: "Remote iframe via asset-base",
+    lib: "iframe",
+    page: "14-remote-iframe.html",
+    pdf: "remote-iframe.pdf",
+    log: "remote-iframe.log",
+    probeName: "remote-iframe",
+    marker: /Document created/
   }
 ];
 
@@ -136,10 +186,15 @@ export const VENDOR_DIRS = ["openseadragon/build/openseadragon/images"];
 /**
  * Rewrites an input-page copy for the showcase base path: absolute
  * `/vendor/…` URLs (script src, importmap, OSD prefixUrl) become relative to
- * `fixtures/inputs/`. Tag order (importmap before module) is untouched.
+ * `fixtures/inputs/`. The remote-iframe fixture's `fixture.example.test`
+ * origin (mapped through --asset-base in the render) becomes a relative path
+ * too, so the iframe loads from the same directory on the Pages site.
  */
 export function rewriteInputHtml(html) {
-  return html.replaceAll('"/vendor/', '"../vendor/').replaceAll("'/vendor/", "'../vendor/");
+  return html
+    .replaceAll('"/vendor/', '"../vendor/')
+    .replaceAll("'/vendor/", "'../vendor/")
+    .replaceAll("https://fixture.example.test/pages/", "");
 }
 
 /** True when a rewritten copy has no absolute vendor URL left. */
@@ -200,9 +255,10 @@ function copyInputs(outDir) {
   const inputsDir = join(outDir, "inputs");
   mkdirSync(inputsDir, { recursive: true });
   for (const name of readdirSync(PAGES_DIR)) {
-    // Pages and their support scripts (a `<script async src>` fixture needs
-    // its .js file next to the copied input).
-    if (!name.endsWith(".html") && !name.endsWith(".js")) continue;
+    // Pages, their support scripts and the data files the fetch fixtures
+    // request at runtime (a `<script async src>` fixture needs its .js file
+    // next to the copied input, the data fixtures their .json datasets).
+    if (!name.endsWith(".html") && !name.endsWith(".js") && !name.endsWith(".json")) continue;
     const rewritten = rewriteInputHtml(readFileSync(join(PAGES_DIR, name), "utf-8"));
     if (hasAbsoluteVendorUrl(rewritten)) {
       throw new Error(`Unresolved absolute vendor URL in ${name}`);
