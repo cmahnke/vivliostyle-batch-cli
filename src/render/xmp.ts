@@ -45,6 +45,10 @@ export type XmpFields = {
   author?: string;
   subject?: string;
   keywords?: string;
+  /** Bare DOI; wins over url for dc:identifier (what reference managers read). */
+  doi?: string;
+  /** Source URL; used as dc:identifier only when no DOI is set. */
+  url?: string;
   producer?: string;
   creatorTool?: string;
   /** XMP dates (YYYY-MM-DDThh:mm:ssTZD, XMP Part 1, 8.2.1.2). */
@@ -142,6 +146,14 @@ export function buildXmpPacket(fields: XmpFields, label?: PdfLabel): string {
   }
   if (fields.keywords !== undefined) {
     properties.push(`<pdf:Keywords>${xmlEscape(fields.keywords)}</pdf:Keywords>`);
+  }
+  // dc:identifier carries the DOI when one is known — Zotero and friends pick
+  // it up on PDF import — otherwise the source URL. The info dictionary has
+  // no entry for either, so this is the only place they appear.
+  if (fields.doi !== undefined) {
+    properties.push(`<dc:identifier>doi:${xmlEscape(fields.doi)}</dc:identifier>`);
+  } else if (fields.url !== undefined) {
+    properties.push(`<dc:identifier>${xmlEscape(fields.url)}</dc:identifier>`);
   }
   if (fields.producer !== undefined) {
     properties.push(`<pdf:Producer>${xmlEscape(fields.producer)}</pdf:Producer>`);

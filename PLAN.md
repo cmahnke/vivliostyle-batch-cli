@@ -48,9 +48,15 @@ The labels are written but nothing validates conformance. Follow-up:
   backend. Add flags if users need control (vivliostyle reads creation from
   publication metadata; we skipped that).
 - Manifest extraction reads `title`, `author`, `description`, `keywords`,
-  `language`/`inLanguage` only — no `dateModified` → creation date, no
-  canonical/link-derived metadata. Extend `extractMetadataFromManifest` when
-  a manifest in the wild misses something.
+  `doi`/`identifier` (DOI form only), `url` (absolute http(s) only) and
+  `language`/`inLanguage` — no `dateModified` → creation date. Extend
+  `extractMetadataFromManifest` when a manifest in the wild misses something.
+- DOI/URL identifiers are implemented: CLI `--doi`/`--url` > manifest
+  (`doi`, `identifier` / `url`) > document (`citation_doi`, `dc.doi`,
+  `dc.identifier` DOI form, canonical link / `og:url`). A DOI wins over the
+  URL and is written as XMP `dc:identifier` (`doi:` prefix), otherwise the
+  URL takes that slot — this is what Zotero/JabRef read on PDF import. The
+  info dictionary has no entry for either.
 - HTML extraction has no fallback to `og:title`/`og:description` and no
   support for `dcterms.date`. Cheap to add if needed.
 - Consolidation: `execute()` now parses the input HTML three times

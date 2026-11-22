@@ -53,6 +53,8 @@ export type RenderPdfRequest = {
   author?: string;
   subject?: string;
   keywords?: string;
+  doi?: string;
+  url?: string;
   language?: string;
   /** ISO 8601 creation date; overrides the one the print backend wrote. */
   created?: string;
@@ -101,6 +103,8 @@ function pdfMetadata(request: RenderPdfRequest) {
     ...(request.author === undefined ? {} : { author: request.author }),
     ...(request.subject === undefined ? {} : { subject: request.subject }),
     ...(request.keywords === undefined ? {} : { keywords: request.keywords }),
+    ...(request.doi === undefined ? {} : { doi: request.doi }),
+    ...(request.url === undefined ? {} : { url: request.url }),
     ...(request.language === undefined ? {} : { language: request.language }),
     ...(request.created === undefined ? {} : { created: request.created }),
     ...(request.modified === undefined ? {} : { modified: request.modified }),

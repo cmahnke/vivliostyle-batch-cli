@@ -10,9 +10,9 @@ It runs the [Vivliostyle viewer](https://www.npmjs.com/package/@vivliostyle/view
 - Preview documents in the browser
 - Render with the real browser engine, so canvas charts, WebGL scenes and cross-origin iframes end up in the PDF
 - Stay sharp past 96dpi: `--pixel-ratio` redraws JS-painted content at higher backing resolution
-- Stamp PDF metadata — title, author, subject, keywords, language — into the information dictionary and a matching XMP packet
+- Stamp PDF metadata — title, author, subject, keywords, DOI/URL, language — into the information dictionary and a matching XMP packet
 - Label the output as PDF/A or PDF/X with `--pdfa` / `--pdfx`, embedding an ICC output intent (`--icc-profile`, bundled sRGB default)
-- Metadata comes from the flags, the publication manifest or the document itself (`<title>`, `<meta>` tags)
+- Metadata comes from the flags, the publication manifest or the document itself (`<title>`, `<meta>` tags, `<link rel="canonical">`)
 - Per-push showcase page (GitHub Pages) with the render fixtures next to their PDFs
 - Automatic detection and mapping of static assets from HTML (`<link>`, `<script>`, `<img>`, etc.)
 - Support for custom static asset mappings via `--static`
@@ -67,41 +67,43 @@ vivliostyle-cli -i index.html -o output.pdf -- --size A4 --viewer-param pixelRat
 
 ## Options
 
-| Option                              | Description                                                                                                                       |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `-i, --input <input>`               | Input HTML or publication manifest file (required)                                                                                |
-| `-o, --output <file>`               | Output file path (default: `output.pdf`)                                                                                          |
-| `--title <title>`                   | Document title (overrides source)                                                                                                 |
-| `--author <author>`                 | Document author                                                                                                                   |
-| `--subject <subject>`               | Document subject (e.g. the page's description meta tag content)                                                                   |
-| `--keywords <keywords>`             | Document keywords, comma separated                                                                                                |
-| `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`); taken from the document or manifest when omitted, falling back to `de`             |
-| `--pdfa <level>`                    | Label the output as PDF/A: `1a`, `1b`, `2a`, `2b`, `2u`, `3a`, `3b`, `3u`, `4`. Embeds the sRGB output intent unless overridden   |
-| `--pdfx <version>`                  | Label the output as PDF/X: `X-4` or `X-1a:2003` (requires `--icc-profile`)                                                        |
-| `--icc-profile <path>`              | ICC profile embedded as the PDF output intent (required for `--pdfx`)                                                             |
-| `--no-validate`                     | Skip the built-in compliance checks run for `--pdfa`/`--pdfx` output                                                              |
-| `--verapdf`                         | Additionally run the verapdf binary (must be on the PATH) against the output and fail the build on full ISO rule-set violations   |
-| `--static <mapping>`                | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)                                                          |
-| `--no-scripts`                      | Do not map `<script src>` tags as static assets                                                                                   |
-| `--asset-base <urlBase=localBase>`  | Map URLs starting with `urlBase` to files under `localBase` (repeatable)                                                          |
-| `--ignore-asset <path>`             | Skip specific virtual paths when deriving static mappings (repeatable)                                                            |
-| `--allow-remote`                    | Keep subresource references that would be fetched from the network (default: drop)                                                |
-| `--executable-browser <path>`       | Chrome/Chromium binary to render with (default: search puppeteer cache, then system)                                              |
-| `--dump-html <dir>`                 | Write the rewritten input HTML into `<dir>` and keep it (debugging aid)                                                           |
-| `--fetch-missing`                   | Load references without a local file from the web (implies `--allow-remote`; drops gone remotes after a HEAD probe)               |
-| `--wait-for-content [ms]` --------- | Delay pagination until the page finished its own async work; pages with `<script>` wait automatically (10s default, `0` disables) |
-| `--quiet-ms <ms>` ----------------- | Quiet period before the layout gate opens (default 400) ---------------------------                                               |
-| `--pixel-ratio <n>` --------------- | Render at `n` times the output resolution; redraws `__vivResize` pages at `n`× backing pixels                                     |
-| `--timeout <ms>` ------------------ | Give up on a page after `<ms>` (default: 300000) ---------------------------------                                                |
-| `--format <format>`                 | Output format: `pdf` (default: `pdf`)                                                                                             |
-| `--log-level <level>`               | Log level: `silent`, `info`, `verbose`, or `debug` (default: `info`)                                                              |
-| `--mode <mode>`                     | Execution mode: `build` or `preview` (default: `build`)                                                                           |
-| `--preview`                         | Shorthand for `--mode preview` — open result in browser                                                                           |
-| `-d, --debug`                       | Enable debug mode (sets log level to `debug`)                                                                                     |
+| Option                              | Description                                                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `-i, --input <input>`               | Input HTML or publication manifest file (required)                                                                                   |
+| `-o, --output <file>`               | Output file path (default: `output.pdf`)                                                                                             |
+| `--title <title>`                   | Document title (overrides source)                                                                                                    |
+| `--author <author>`                 | Document author                                                                                                                      |
+| `--subject <subject>`               | Document subject (e.g. the page's description meta tag content)                                                                      |
+| `--keywords <keywords>`             | Document keywords, comma separated                                                                                                   |
+| `--doi <doi>`                       | Document DOI (bare `10.x/…`, `doi:` URI or doi.org URL); wins over `--url` and is written as the XMP `dc:identifier` (`doi:` prefix) |
+| `--url <url>`                       | Document URL; XMP `dc:identifier` when no DOI is set, so reference managers can pick up the source                                   |
+| `--language <lang>`                 | Document language tag (e.g. `en`, `de`, `ja`); taken from the document or manifest when omitted, falling back to `de`                |
+| `--pdfa <level>`                    | Label the output as PDF/A: `1a`, `1b`, `2a`, `2b`, `2u`, `3a`, `3b`, `3u`, `4`. Embeds the sRGB output intent unless overridden      |
+| `--pdfx <version>`                  | Label the output as PDF/X: `X-4` or `X-1a:2003` (requires `--icc-profile`)                                                           |
+| `--icc-profile <path>`              | ICC profile embedded as the PDF output intent (required for `--pdfx`)                                                                |
+| `--no-validate`                     | Skip the built-in compliance checks run for `--pdfa`/`--pdfx` output                                                                 |
+| `--verapdf`                         | Additionally run the verapdf binary (must be on the PATH) against the output and fail the build on full ISO rule-set violations      |
+| `--static <mapping>`                | Map virtual path to local path: `/virtual/path:/local/path` (repeatable)                                                             |
+| `--no-scripts`                      | Do not map `<script src>` tags as static assets                                                                                      |
+| `--asset-base <urlBase=localBase>`  | Map URLs starting with `urlBase` to files under `localBase` (repeatable)                                                             |
+| `--ignore-asset <path>`             | Skip specific virtual paths when deriving static mappings (repeatable)                                                               |
+| `--allow-remote`                    | Keep subresource references that would be fetched from the network (default: drop)                                                   |
+| `--executable-browser <path>`       | Chrome/Chromium binary to render with (default: search puppeteer cache, then system)                                                 |
+| `--dump-html <dir>`                 | Write the rewritten input HTML into `<dir>` and keep it (debugging aid)                                                              |
+| `--fetch-missing`                   | Load references without a local file from the web (implies `--allow-remote`; drops gone remotes after a HEAD probe)                  |
+| `--wait-for-content [ms]` --------- | Delay pagination until the page finished its own async work; pages with `<script>` wait automatically (10s default, `0` disables)    |
+| `--quiet-ms <ms>` ----------------- | Quiet period before the layout gate opens (default 400) ---------------------------                                                  |
+| `--pixel-ratio <n>` --------------- | Render at `n` times the output resolution; redraws `__vivResize` pages at `n`× backing pixels                                        |
+| `--timeout <ms>` ------------------ | Give up on a page after `<ms>` (default: 300000) ---------------------------------                                                   |
+| `--format <format>`                 | Output format: `pdf` (default: `pdf`)                                                                                                |
+| `--log-level <level>`               | Log level: `silent`, `info`, `verbose`, or `debug` (default: `info`)                                                                 |
+| `--mode <mode>`                     | Execution mode: `build` or `preview` (default: `build`)                                                                              |
+| `--preview`                         | Shorthand for `--mode preview` — open result in browser                                                                              |
+| `-d, --debug`                       | Enable debug mode (sets log level to `debug`)                                                                                        |
 
 ## Notes
 
-- **PDF metadata and standards labeling**: every build stamps a producer/creator identity (`vivliostyle-batch-cli`) and a document language. Title, author, subject, keywords and language resolve with this precedence: CLI flags → publication manifest (`.json` input) → the document itself (`<title>`, `<meta name="author">`/`dc.creator`, `<meta name="description">`, `<meta name="keywords">`, `html[lang]`) → language fallback `de`. The values land in both the PDF information dictionary and an XMP metadata stream kept consistent with it, plus the catalog `/Lang` entry. `--pdfa <level>` and `--pdfx <version>` additionally write the standards identification (XMP `pdfaid`/`pdfxid` properties, an OutputIntent with an embedded ICC profile and a file identifier). This is a **label, not a conversion**: the rendered content is neither converted nor checked, so conformance of the content is the author's responsibility — verify with veraPDF when it matters. Chrome's output carries transparency, so `--pdfa 2b` (or newer) is the realistic level; PDF/A-1b will usually fail validation.
+- **PDF metadata and standards labeling**: every build stamps a producer/creator identity (`vivliostyle-batch-cli`) and a document language. Title, author, subject, keywords, DOI/URL and language resolve with this precedence: CLI flags → publication manifest (`.json` input) → the document itself (`<title>`, `<meta name="author">`/`dc.creator`, `<meta name="description">`, `<meta name="keywords">`, `citation_doi`/`dc.doi`/`dc.identifier`, `<link rel="canonical">`/`og:url`, `html[lang]`) → language fallback `de`. The values land in both the PDF information dictionary and an XMP metadata stream kept consistent with it, plus the catalog `/Lang` entry. A DOI (flag, manifest, or meta — bare, `doi:` or doi.org URL forms all normalize) is written as XMP `dc:identifier` with a `doi:` prefix; when no DOI is known, the document URL is written there instead. Reference managers (Zotero, JabRef) pick the identifier up on PDF import. `--pdfa <level>` and `--pdfx <version>` additionally write the standards identification (XMP `pdfaid`/`pdfxid` properties, an OutputIntent with an embedded ICC profile and a file identifier). This is a **label, not a conversion**: the rendered content is neither converted nor checked, so conformance of the content is the author's responsibility — verify with veraPDF when it matters. Chrome's output carries transparency, so `--pdfa 2b` (or newer) is the realistic level; PDF/A-1b will usually fail validation.
 
 Validation happens in two layers: every labeled build runs the built-in checks (a practical subset covering the PDF version of the labeled part, the XMP identification, the OutputIntent, the file identifier, embedded fonts and the absence of JavaScript; `--no-validate` skips them), and `--verapdf` additionally runs the [veraPDF](https://verapdf.org/) binary against the output for the full ISO rule set. `--verapdf` requires a veraPDF installation on the PATH (it needs a Java runtime) and makes the build fail if either the binary is missing or the output violates the labeled standard. For CI, the repository ships a reusable setup action (`.github/actions/setup-verapdf`) that installs veraPDF unattended.
 

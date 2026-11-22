@@ -15,6 +15,7 @@ import {
   DEFAULT_LANGUAGE,
   extractMetadataFromDocument,
   extractMetadataFromManifest,
+  normalizeDoi,
   parsePdfaLabel,
   parsePdfxLabel,
   resolveMetadata
@@ -111,6 +112,23 @@ describe("buildXmpPacket", () => {
     expect(packet).toContain("<pdf:Producer>p</pdf:Producer>");
   });
 
+  it("writes the DOI as dc:identifier and drops the url", () => {
+    const packet = buildXmpPacket({ ...base, doi: "10.5281/zenodo.12345", url: "https://example.org/post" });
+    expect(packet).toContain("<dc:identifier>doi:10.5281/zenodo.12345</dc:identifier>");
+    expect(packet).not.toContain("https://example.org/post");
+  });
+
+  it("writes the url as dc:identifier when no DOI is set", () => {
+    const packet = buildXmpPacket({ ...base, url: "https://example.org/post" });
+    expect(packet).toContain("<dc:identifier>https://example.org/post</dc:identifier>");
+    expect(packet).not.toContain("<dc:identifier>doi:");
+  });
+
+  it("escapes dc:identifier values", () => {
+    const packet = buildXmpPacket({ ...base, url: "https://example.org/?a=1&b=2" });
+    expect(packet).toContain("<dc:identifier>https://example.org/?a=1&amp;b=2</dc:identifier>");
+  });
+
   it("writes the PDF/A identification", () => {
     const packet = buildXmpPacket(base, { kind: "pdfa", part: "2", conformance: "b" });
     expect(packet).toContain("<pdfaid:part>2</pdfaid:part>");
@@ -185,6 +203,22 @@ describe("postProcessPdf", () => {
     expect(xmp).toContain('<rdf:li xml:lang="x-default">XMP Title</rdf:li>');
     expect(xmp).toContain("<pdf:Producer>vivliostyle-batch-cli</pdf:Producer>");
     expect(xmp).toContain("<xmpMM:DocumentID>uuid:");
+  });
+
+  it("stamps the DOI as dc:identifier into the XMP stream", async () => {
+    const stamped = await postProcessPdf(await minimalPdf(), {
+      metadata: { doi: "10.5281/zenodo.12345", creator: "c", producer: "p" }
+    });
+    const { catalog } = openPdf(stamped);
+    expect(catalog.get("Metadata").readStream().asString()).toContain("<dc:identifier>doi:10.5281/zenodo.12345</dc:identifier>");
+  });
+
+  it("stamps the url as dc:identifier into the XMP stream", async () => {
+    const stamped = await postProcessPdf(await minimalPdf(), {
+      metadata: { url: "https://example.org/post", creator: "c", producer: "p" }
+    });
+    const { catalog } = openPdf(stamped);
+    expect(catalog.get("Metadata").readStream().asString()).toContain("<dc:identifier>https://example.org/post</dc:identifier>");
   });
 
   it("writes the catalog language entry", async () => {
@@ -331,6 +365,47 @@ describe("extractMetadataFromDocument", () => {
     const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>");
     expect(extractMetadataFromDocument(dom.window.document)).toEqual({});
   });
+
+  it("reads the DOI from the usual metas and normalizes it", () => {
+    const dom = new JSDOM(`<!doctype html><html><head>
+      <meta name="citation_doi" content="https://doi.org/10.5281/zenodo.12345">
+      </head><body></body></html>`);
+    expect(extractMetadataFromDocument(dom.window.document)).toEqual({ doi: "10.5281/zenodo.12345" });
+
+    const dcDom = new JSDOM(`<!doctype html><html><head>
+      <meta name="dc.identifier" content="doi:10.1000/xyz123">
+      </head><body></body></html>`);
+    expect(extractMetadataFromDocument(dcDom.window.document)).toEqual({ doi: "10.1000/xyz123" });
+  });
+
+  it("ignores a dc.identifier that is not a DOI", () => {
+    const dom = new JSDOM(`<!doctype html><html><head>
+      <meta name="dc.identifier" content="urn:isbn:0-330-23468-8">
+      </head><body></body></html>`);
+    expect(extractMetadataFromDocument(dom.window.document)).toEqual({});
+  });
+
+  it("reads the document URL from the canonical link", () => {
+    const dom = new JSDOM(`<!doctype html><html><head>
+      <link rel="canonical" href="https://example.org/blog/post">
+      </head><body></body></html>`);
+    expect(extractMetadataFromDocument(dom.window.document)).toEqual({ url: "https://example.org/blog/post" });
+  });
+
+  it("reads the document URL from og:url when no canonical link exists", () => {
+    const dom = new JSDOM(`<!doctype html><html><head>
+      <meta property="og:url" content="https://example.org/blog/other">
+      </head><body></body></html>`);
+    expect(extractMetadataFromDocument(dom.window.document)).toEqual({ url: "https://example.org/blog/other" });
+  });
+
+  it("ignores relative and non-http document URLs", () => {
+    const dom = new JSDOM(`<!doctype html><html><head>
+      <link rel="canonical" href="blog/post">
+      <meta property="og:url" content="javascript:alert(1)">
+      </head><body></body></html>`);
+    expect(extractMetadataFromDocument(dom.window.document)).toEqual({});
+  });
 });
 
 describe("extractMetadataFromManifest", () => {
@@ -354,6 +429,39 @@ describe("extractMetadataFromManifest", () => {
   it("returns undefined for invalid JSON", () => {
     expect(extractMetadataFromManifest("{ not json")).toBeUndefined();
   });
+
+  it("reads the DOI and URL from the manifest", () => {
+    const manifest = JSON.stringify({
+      title: "Report",
+      doi: "doi:10.5281/zenodo.12345",
+      url: "https://example.org/report"
+    });
+    expect(extractMetadataFromManifest(manifest)).toEqual({
+      title: "Report",
+      doi: "10.5281/zenodo.12345",
+      url: "https://example.org/report"
+    });
+  });
+
+  it("ignores non-DOI identifiers and relative manifest URLs", () => {
+    const manifest = JSON.stringify({ identifier: "urn:isbn:0-330-23468-8", url: "/report" });
+    expect(extractMetadataFromManifest(manifest)).toEqual({});
+  });
+});
+
+describe("normalizeDoi", () => {
+  it("accepts the bare, doi: and doi.org forms", () => {
+    expect(normalizeDoi("10.5281/zenodo.12345")).toBe("10.5281/zenodo.12345");
+    expect(normalizeDoi("doi:10.5281/zenodo.12345")).toBe("10.5281/zenodo.12345");
+    expect(normalizeDoi("https://doi.org/10.5281/zenodo.12345")).toBe("10.5281/zenodo.12345");
+    expect(normalizeDoi("http://dx.doi.org/10.5281/zenodo.12345")).toBe("10.5281/zenodo.12345");
+  });
+
+  it("rejects values that are not DOIs", () => {
+    expect(normalizeDoi("urn:isbn:0-330-23468-8")).toBeUndefined();
+    expect(normalizeDoi("https://example.org/10.5281/x")).toBeUndefined();
+    expect(normalizeDoi("")).toBeUndefined();
+  });
 });
 
 describe("resolveMetadata", () => {
@@ -368,6 +476,15 @@ describe("resolveMetadata", () => {
   it("fills fields the CLI does not set and defaults the language", () => {
     expect(resolveMetadata({}, { title: "Doc Title" })).toEqual({ title: "Doc Title", language: DEFAULT_LANGUAGE });
     expect(resolveMetadata({}, {}).language).toBe(DEFAULT_LANGUAGE);
+  });
+
+  it("lets the CLI DOI and URL win; the XMP builder drops the URL when a DOI exists", () => {
+    expect(resolveMetadata({ doi: "10.5281/cli" }, { doi: "10.5281/doc", url: "https://doc.example" })).toEqual({
+      doi: "10.5281/cli",
+      url: "https://doc.example",
+      language: DEFAULT_LANGUAGE
+    });
+    expect(resolveMetadata({}, { doi: "10.5281/doc", url: "https://doc.example" }).doi).toBe("10.5281/doc");
   });
 });
 

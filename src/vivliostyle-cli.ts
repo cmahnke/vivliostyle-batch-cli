@@ -17,6 +17,7 @@ import { loadDefaultIccProfile } from "./render/pdf-postprocess.js";
 import {
   extractMetadataFromDocument,
   extractMetadataFromManifest,
+  normalizeDoi,
   parsePdfaLabel,
   parsePdfxLabel,
   resolveMetadata,
@@ -35,6 +36,8 @@ type CliOptions = {
   author?: string;
   subject?: string;
   keywords?: string;
+  doi?: string;
+  url?: string;
   language?: string;
   created?: string;
   modified?: string;
@@ -1424,6 +1427,8 @@ function buildProgram(): Command {
     .option("--author <author>", "Document author")
     .option("--subject <subject>", "Document subject (e.g. the page's description meta tag content)")
     .option("--keywords <keywords>", "Document keywords, comma separated")
+    .option("--doi <doi>", "Document DOI (bare, doi: URI or doi.org URL). Wins over --url for the XMP identifier")
+    .option("--url <url>", "Document URL; XMP dc:identifier when no DOI is set (reference managers read it)")
     .option(
       "--language <lang>",
       "Document language tag (e.g. en, de, ja). Taken from the document or manifest when omitted, falling back to 'de'"
@@ -1590,7 +1595,7 @@ function buildProgram(): Command {
         "  • the browser prints that page to PDF, so canvases and iframes stay real content.",
         "  • Collapsed <details> content is opened for the PDF; the preview keeps the page as it is.",
         "  • --asset-base localBase is also a fallback root for CSS-referenced assets.",
-        "  • PDF metadata (--title/--author/--subject/--keywords/--language/--created/--modified)",
+        "  • PDF metadata (--title/--author/--subject/--keywords/--doi/--url/--language/--created/--modified)",
         "  • values read from the document or the publication manifest; language falls",
         "  • back to 'de'. --pdfa/--pdfx label the output; the built-in validation",
         "  • checks the practical subset (--no-validate skips it) and --verapdf runs",
@@ -1629,7 +1634,7 @@ export function parseArgs(argv: string[]): {
 // ---------------------------------------------------------------------------
 
 /** Metadata fields the CLI layer resolves before handing them to the renderer. */
-type MetadataFieldName = "title" | "author" | "subject" | "keywords" | "language" | "created" | "modified";
+type MetadataFieldName = "title" | "author" | "subject" | "keywords" | "doi" | "url" | "language" | "created" | "modified";
 
 /** ICC profile bytes with the name they get in the PDF's OutputIntent. */
 type IccProfile = { bytes: Uint8Array; name: string };
@@ -1666,6 +1671,8 @@ async function runRender(params: RenderParams): Promise<void> {
     ...(params.metaFields.author === undefined ? {} : { author: params.metaFields.author }),
     ...(params.metaFields.subject === undefined ? {} : { subject: params.metaFields.subject }),
     ...(params.metaFields.keywords === undefined ? {} : { keywords: params.metaFields.keywords }),
+    ...(params.metaFields.doi === undefined ? {} : { doi: params.metaFields.doi }),
+    ...(params.metaFields.url === undefined ? {} : { url: params.metaFields.url }),
     ...(params.metaFields.language === undefined ? {} : { language: params.metaFields.language }),
     ...(params.metaFields.created === undefined ? {} : { created: params.metaFields.created }),
     ...(params.metaFields.modified === undefined ? {} : { modified: params.metaFields.modified }),
@@ -1782,7 +1789,7 @@ export function resolveIccProfile(options: Pick<CliOptions, "iccProfile">, label
  * to "de" when no source provides one.
  */
 export function resolvePdfMetadata(
-  options: Pick<CliOptions, "title" | "author" | "subject" | "keywords" | "language" | "created" | "modified">,
+  options: Pick<CliOptions, "title" | "author" | "subject" | "keywords" | "doi" | "url" | "language" | "created" | "modified">,
   inputAbs: string,
   htmlMode: boolean
 ): DocumentMetadata & { language: string } {
@@ -1791,10 +1798,19 @@ export function resolvePdfMetadata(
     "author",
     "subject",
     "keywords",
+    "doi",
+    "url",
     "language",
     "created",
     "modified"
   ]) as DocumentMetadata;
+  if (cliFields.doi !== undefined) {
+    const normalized = normalizeDoi(cliFields.doi);
+    if (normalized === undefined) {
+      throw new Error(`--doi is not a DOI: "${cliFields.doi}". Use the bare form (10.xxxx/…), a doi: URI or a doi.org URL`);
+    }
+    cliFields.doi = normalized;
+  }
   let derived: DocumentMetadata | undefined;
   if (htmlMode) {
     derived = extractMetadataFromDocument(new JSDOM(readFileSync(inputAbs, "utf-8")).window.document);

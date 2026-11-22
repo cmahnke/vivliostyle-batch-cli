@@ -35,6 +35,10 @@ export type PdfMetadata = {
   author?: string;
   subject?: string;
   keywords?: string;
+  /** Bare DOI; wins over url for the XMP dc:identifier. */
+  doi?: string;
+  /** Source URL; dc:identifier when no DOI is set. */
+  url?: string;
   language?: string;
   /** ISO 8601 or PDF date; overrides the creation date the print backend wrote. */
   created?: string;
@@ -251,6 +255,8 @@ export async function postProcessPdf(pdf: Uint8Array, options: PostProcessOption
         author: metadata.author,
         subject: metadata.subject,
         keywords: metadata.keywords,
+        doi: metadata.doi,
+        url: metadata.url,
         producer: metadata.producer,
         creatorTool: metadata.creator,
         createDate: createDateXmp,

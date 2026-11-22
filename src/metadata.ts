@@ -21,6 +21,10 @@ export type DocumentMetadata = {
   author?: string;
   subject?: string;
   keywords?: string;
+  /** Normalized bare DOI (10.…/…); reference managers read it as dc:identifier. */
+  doi?: string;
+  /** Source URL of the document, used as dc:identifier when no DOI is known. */
+  url?: string;
   language?: string;
   /** ISO 8601 creation date (information dictionary and XMP CreateDate). */
   created?: string;
@@ -31,30 +35,89 @@ export type DocumentMetadata = {
 /** Language tag assumed when no source provides one (project contract). */
 export const DEFAULT_LANGUAGE = "de";
 
+// Bare DOI form (ISO 26324): a directory indicator plus a suffix. Accepts
+// variants authors hand over: bare, doi: URIs and resolver URLs.
+export const DOI_PATTERN = /^10\.\d{4,9}\/\S+$/;
+
+/**
+ * Normalizes a DOI the user supplied: resolver URLs (`https://doi.org/…`,
+ * `http://dx.doi.org/…`, `https://hdl.handle.net/…` keeps `10.` handles) and
+ * `doi:` URIs reduce to the bare form, which is validated against ISO 26324.
+ * Returns undefined when the value is not a DOI at all.
+ */
+export function normalizeDoi(value: string): string | undefined {
+  let doi = value.trim();
+  for (const prefix of ["https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "http://dx.doi.org/", "doi:"]) {
+    if (doi.toLowerCase().startsWith(prefix.toLowerCase())) {
+      doi = doi.slice(prefix.length);
+      break;
+    }
+  }
+  doi = doi.trim();
+  if (!DOI_PATTERN.test(doi)) return undefined;
+  return doi;
+}
+
+/** Reads a DOI from a meta content, ignoring values that are not DOIs. */
+function doiMetaContent(names: readonly string[], document: Document): string | undefined {
+  const content = metaContentOf(names, document);
+  return content === undefined ? undefined : normalizeDoi(content);
+}
+
+/**
+ * Extracts a document URL: the canonical link wins, then the usual
+ * URL meta tags. Only absolute http(s) URLs are accepted.
+ */
+function extractDocumentUrl(document: Document): string | undefined {
+  const candidates: Array<string | null | undefined> = [
+    document.querySelector('link[rel="canonical" i]')?.getAttribute("href"),
+    document.querySelector('meta[property="og:url" i]')?.getAttribute("content"),
+    document.querySelector('meta[name="citation_url" i]')?.getAttribute("content"),
+    document.querySelector('meta[name="dc.url" i]')?.getAttribute("content")
+  ];
+  for (const candidate of candidates) {
+    const url = candidate?.trim();
+    if (url === undefined || url === "") continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+  }
+  return undefined;
+}
+
+/** First non-empty `content` of the named meta tags (name or http-equiv). */
+function metaContentOf(names: readonly string[], document: Document): string | undefined {
+  for (const name of names) {
+    const element = document.querySelector(`meta[name="${name}" i]`) ?? document.querySelector(`meta[http-equiv="${name}" i]`);
+    const content = element?.getAttribute("content")?.trim();
+    if (content !== undefined && content !== "") return content;
+  }
+  return undefined;
+}
+
 /**
  * Extracts metadata from the input document: <title>, the usual
- * author/description/keywords meta tags, the creation/modification dates
- * (dcterms, falling back to the plain date meta tag) and the document
- * language.
+ * author/description/keywords meta tags, the DOI (citation_doi, dc.doi,
+ * dc.identifier when it holds a DOI), the document URL (canonical link,
+ * og:url), the creation/modification dates (dcterms, falling back to the
+ * plain date meta tag) and the document language.
  */
 export function extractMetadataFromDocument(document: Document): DocumentMetadata {
   const title = document.querySelector("title")?.textContent?.trim();
-  const metaContent = (names: readonly string[]): string | undefined => {
-    for (const name of names) {
-      const element = document.querySelector(`meta[name="${name}" i]`) ?? document.querySelector(`meta[http-equiv="${name}" i]`);
-      const content = element?.getAttribute("content")?.trim();
-      if (content !== undefined && content !== "") return content;
-    }
-    return undefined;
-  };
   return {
     ...(title === undefined || title === "" ? {} : { title }),
-    ...optional(metaContent(["author", "dc.creator", "dcterms.creator"]), (value) => ({ author: value })),
-    ...optional(metaContent(["description", "dc.description"]), (value) => ({ subject: value })),
-    ...optional(metaContent(["keywords"]), (value) => ({ keywords: value })),
-    ...optional(metaContent(["dcterms.created", "dc.date", "date"]), (value) => ({ created: value })),
-    ...optional(metaContent(["dcterms.modified", "dc.date.modified", "modified"]), (value) => ({ modified: value })),
-    ...optional(document.documentElement.getAttribute("lang")?.trim() || metaContent(["content-language"]), (value) => ({
+    ...optional(metaContentOf(["author", "dc.creator", "dcterms.creator"], document), (value) => ({ author: value })),
+    ...optional(metaContentOf(["description", "dc.description"], document), (value) => ({ subject: value })),
+    ...optional(metaContentOf(["keywords"], document), (value) => ({ keywords: value })),
+    ...optional(doiMetaContent(["citation_doi", "dc.doi", "dc.identifier", "doi"], document), (value) => ({ doi: value })),
+    ...optional(extractDocumentUrl(document), (value) => ({ url: value })),
+    ...optional(metaContentOf(["dcterms.created", "dc.date", "date"], document), (value) => ({ created: value })),
+    ...optional(metaContentOf(["dcterms.modified", "dc.date.modified", "modified"], document), (value) => ({ modified: value })),
+    ...optional(document.documentElement.getAttribute("lang")?.trim() || metaContentOf(["content-language"], document), (value) => ({
       language: value
     }))
   };
@@ -62,8 +125,8 @@ export function extractMetadataFromDocument(document: Document): DocumentMetadat
 
 /**
  * Extracts metadata from a publication manifest (W3C Web Publication
- * Manifest shape): title, author, description, keywords and language.
- * Returns undefined when the text is not a JSON object.
+ * Manifest shape): title, author, description, keywords, DOI, URL and
+ * language. Returns undefined when the text is not a JSON object.
  */
 export function extractMetadataFromManifest(text: string): DocumentMetadata | undefined {
   let manifest: unknown;
@@ -79,6 +142,8 @@ export function extractMetadataFromManifest(text: string): DocumentMetadata | un
     ...optional(asAuthorList(record.author), (value) => ({ author: value })),
     ...optional(asString(record.description), (value) => ({ subject: value })),
     ...optional(asStringList(record.keywords, ", "), (value) => ({ keywords: value })),
+    ...optional(asDoi(record.doi ?? record.identifier), (value) => ({ doi: value })),
+    ...optional(asUrl(record.url), (value) => ({ url: value })),
     ...optional(asStringList(record.language ?? record.inLanguage, " "), (value) => ({ language: value }))
   };
 }
@@ -138,6 +203,25 @@ function optional<T>(value: T | undefined | null, wrap: (value: T) => DocumentMe
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+/** Reads a DOI from a manifest value; non-DOI identifiers are ignored. */
+function asDoi(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return normalizeDoi(value);
+}
+
+/** Reads a http(s) URL from a manifest value; relative links are ignored. */
+function asUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const url = value.trim();
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+  } catch {
+    return undefined;
+  }
+  return url;
 }
 
 /** Flattens string | {name} | ({name} | string)[] into "a; b" form. */

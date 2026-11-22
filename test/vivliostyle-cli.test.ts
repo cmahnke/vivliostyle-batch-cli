@@ -1573,6 +1573,57 @@ describe("vivliostyle-cli", () => {
     expect(request.language).toBe("en");
   });
 
+  it("extracts DOI and document URL from the document", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(
+      inputFile,
+      [
+        `<!doctype html><html lang="de"><head><title>Doc Title</title>`,
+        `<meta name="citation_doi" content="doi:10.5281/zenodo.12345">`,
+        `<link rel="canonical" href="https://example.org/blog/post">`,
+        `</head><body></body></html>`
+      ].join(""),
+      "utf-8"
+    );
+
+    await runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf")]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.doi).toBe("10.5281/zenodo.12345");
+    expect(request.url).toBe("https://example.org/blog/post");
+  });
+
+  it("lets --doi and --url override the document and normalizes the DOI", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(
+      inputFile,
+      `<!doctype html><html lang="de"><head><title>Doc Title</title><meta name="citation_doi" content="10.5281/doc.1"></head><body></body></html>`,
+      "utf-8"
+    );
+
+    await runArgs([
+      "--input",
+      inputFile,
+      "--output",
+      join(tempDir, "out.pdf"),
+      "--doi",
+      "https://doi.org/10.5281/zenodo.12345",
+      "--url",
+      "https://example.org/cli"
+    ]);
+
+    const request = renderMock.mock.calls[0][0];
+    expect(request.doi).toBe("10.5281/zenodo.12345");
+    expect(request.url).toBe("https://example.org/cli");
+  });
+
+  it("rejects a --doi value that is not a DOI", async () => {
+    const inputFile = join(tempDir, "input.html");
+    writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
+
+    await expect(runArgs(["--input", inputFile, "--output", join(tempDir, "out.pdf"), "--doi", "not-a-doi"])).rejects.toThrow(/not a DOI/);
+  });
+
   it("falls back to the language default when no source provides one", async () => {
     const inputFile = join(tempDir, "plain.html");
     writeFileSync(inputFile, "<html><body></body></html>", "utf-8");
