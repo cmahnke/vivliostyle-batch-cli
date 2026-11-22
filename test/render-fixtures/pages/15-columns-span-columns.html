@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: columns → span → columns (blog page structure)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+        counter-reset: footnote 0;
+        @footnote {
+          margin-top: 12pt;
+          float: bottom;
+          border-top: 1px solid #333;
+        }
+      }
+      body {
+        font-family: serif;
+      }
+      .meta p {
+        margin: 0 0 0.8em;
+      }
+      .columns {
+        column-count: 2;
+        column-gap: 1.5rem;
+        orphans: 3;
+        widows: 3;
+      }
+      .columns p {
+        margin: 0 0 0.8em;
+      }
+      .footnote {
+        float: footnote;
+        font-size: 6pt;
+        padding-left: 3em;
+        text-indent: -3em;
+      }
+      .footnote-number {
+        font-size: 65%;
+        vertical-align: super;
+        margin-left: 0.1cm;
+      }
+      /* The blog's figure = full-width spanner (the compiled
+         .post-body figure rule: margin 12pt, break-inside avoid,
+         column-span all). */
+      figure {
+        margin: 12pt;
+        break-inside: avoid;
+        column-span: all;
+      }
+      figure img {
+        display: block;
+        width: 476pt;
+        height: auto;
+        border: 1px solid red;
+      }
+      figcaption {
+        font-size: 0.75em;
+        text-align: center;
+      }
+      /* The blog's trailing blocks: hidden in the print css, but still in the
+         DOM when vivliostyle fragments the page. */
+      .post-footer,
+      .related-posts {
+        display: none;
+      }
+      .wikidata-summary {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>columns → span → columns fixture (blog page structure)</h1>
+    <!--
+      Faithful reproduction of the failing blog pages (90ies-train,
+      json-compression): meta rows, two-column body with footnote floats, a
+      full-width figure spanner that lands at the page end, and the invisible
+      trailing blocks (.post-footer with the wikidata summary + spacer,
+      .related-posts) behind it. The failing render emits a phantom page after
+      the spanner even though every trailing block is display:none.
+    -->
+    <div class="meta">
+      <p>Christian Mahnke</p>
+      <p>0000-0000-0000-0000</p>
+      <p>URL: https://example.org/post/columns-span-columns/</p>
+      <p>Schlagworte: Mock, Layout</p>
+    </div>
+    <div class="columns">
+      <p>
+        Column content before the figure: mocked columns-span-columns 42 a.
+        <span class="footnote-number">1</span
+        ><span class="footnote">Fahrgastinformationssystem: https://example.org/ice</span>
+        The figure below takes the full page width and the columns resume after it.
+      </p>
+      <p>
+        More column content before the figure: mocked columns-span-columns 42 b.
+        <span class="footnote-number">2</span
+        ><span class="footnote">AMD 5x86 P-75 S: https://example.org/amd</span>
+      </p>
+      <figure>
+        <img src="./15-figure.png" alt="mocked figure" width="950" height="715" />
+        <figcaption><p>Abb. 1: mocked figure caption 42</p></figcaption>
+      </figure>
+      <p>
+        Column content after the figure: mocked columns-span-columns 42 c.
+        <span class="footnote-number">3</span
+        ><span class="footnote">Archivalia: https://example.org/archivalia</span>
+      </p>
+      <p>
+        More column content after the figure: mocked columns-span-columns 42 d,
+        with enough text to wrap across several rendered lines so the column
+        fills and the pagination between the pages can be asserted reliably.
+      </p>
+    </div>
+    <div class="post-footer">
+      <ul class="wikidata-summary">
+        <div class="wikidata-title">Entitäten in diesem Beitrag (Wikidata)</div>
+        <li class="wikidata-entry"><a href="https://example.org/q1">Wikidata Eintrag: Q1</a></li>
+      </ul>
+      <div class="spacer"> </div>
+    </div>
+    <div class="related-posts">
+      <div class="related-header">Verwandte Beiträge:</div>
+      <ul>
+        <li><a href="https://example.org/related-1">Verwandter Beitrag 1</a></li>
+        <li><a href="https://example.org/related-2">Verwandter Beitrag 2</a></li>
+      </ul>
+    </div>
+    <script>
+      window.__vivFixture = "columns-span-columns";
+      window.__vivReady = true;
+    </script>
+  </body>
+</html>

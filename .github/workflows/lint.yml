@@ -135,6 +135,9 @@ jobs:
             --static /:$PWD/test/render-fixtures \
             --asset-base https://fixture.example.test/=$PWD/test/render-fixtures \
             --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/remote-iframe.log"
+          # Pure CSS/text fixture: no static mounts or asset-base needed.
+          $CLI -i test/render-fixtures/pages/15-columns-span-columns.html -o "$OUT/columns-span-columns.pdf" \
+            --wait-for-content 12000 --timeout 120000 2>&1 | tee "$LOGS/columns-span-columns.log"
       - name: Collect showcase manifest
         # Asserts every marker itself (upscale sizes, frame counts, PDF sizes).
         run: |

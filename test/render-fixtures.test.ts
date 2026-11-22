@@ -50,10 +50,11 @@ export const FIXTURE_PAGES = [
   "12-lazy-images.html",
   "13-canvas-graph.html",
   "13-rdf-graph.js",
-  "13-graph-data.json",
-  "14-remote-iframe.html",
-  "14-remote-child.html"
-] as const;
+      "13-graph-data.json",
+      "14-remote-iframe.html",
+      "14-remote-child.html",
+      "15-columns-span-columns.html"
+    ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
   it("all fixture pages and mock tiles exist", () => {

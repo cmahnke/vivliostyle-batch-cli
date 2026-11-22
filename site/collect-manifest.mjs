@@ -169,6 +169,16 @@ export const FIXTURES = [
     log: "remote-iframe.log",
     probeName: "remote-iframe",
     marker: /Document created/
+  },
+  {
+    id: "columns-span-columns",
+    title: "Columns → span → columns flow",
+    lib: "css columns + column-span",
+    page: "15-columns-span-columns.html",
+    pdf: "columns-span-columns.pdf",
+    log: "columns-span-columns.log",
+    probeName: "columns-span-columns",
+    marker: /Document created/
   }
 ];
 
