@@ -111,6 +111,30 @@ jobs:
           $CLI -i test/render-fixtures/pages/09-deferred-async.html -o "$OUT/deferred.pdf" \
             --static /vendor/d3:$PWD/node_modules/d3 \
             --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/deferred.log"
+          # Fixtures 10-14 fetch absolute fixture.example.test URLs (or rely on
+          # the /pages/ site path for relative ../tiles srcs): mount the whole
+          # fixture root and map the origin via --asset-base, mirroring the
+          # e2e harness (test/e2e-render.test.ts renderArgs).
+          $CLI -i test/render-fixtures/pages/10-module-global-late.html -o "$OUT/module-global-late.pdf" \
+            --static /:$PWD/test/render-fixtures \
+            --asset-base https://fixture.example.test/=$PWD/test/render-fixtures \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/module-global-late.log"
+          $CLI -i test/render-fixtures/pages/11-custom-element-data.html -o "$OUT/custom-element-data.pdf" \
+            --static /:$PWD/test/render-fixtures \
+            --asset-base https://fixture.example.test/=$PWD/test/render-fixtures \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/custom-element-data.log"
+          $CLI -i test/render-fixtures/pages/12-lazy-images.html -o "$OUT/lazy-images.pdf" \
+            --static /:$PWD/test/render-fixtures \
+            --asset-base https://fixture.example.test/=$PWD/test/render-fixtures \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/lazy-images.log"
+          $CLI -i test/render-fixtures/pages/13-canvas-graph.html -o "$OUT/canvas-graph.pdf" \
+            --static /:$PWD/test/render-fixtures \
+            --asset-base https://fixture.example.test/=$PWD/test/render-fixtures \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/canvas-graph.log"
+          $CLI -i test/render-fixtures/pages/14-remote-iframe.html -o "$OUT/remote-iframe.pdf" \
+            --static /:$PWD/test/render-fixtures \
+            --asset-base https://fixture.example.test/=$PWD/test/render-fixtures \
+            --wait-for-content 12000 --pixel-ratio 2 --timeout 120000 2>&1 | tee "$LOGS/remote-iframe.log"
       - name: Collect showcase manifest
         # Asserts every marker itself (upscale sizes, frame counts, PDF sizes).
         run: |
