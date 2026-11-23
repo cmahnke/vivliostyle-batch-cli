@@ -670,13 +670,25 @@ export function referencesToProbe(url: string, assetBases: AssetBaseMapping[]): 
 export async function probeRemoteReferences(urls: string[], timeoutMs = 8000): Promise<Set<string>> {
   const unavailable = new Set<string>();
 
+  const isGone = async (url: string): Promise<boolean> => {
+    const response = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+    // Only a definite "gone" counts: servers that reject HEAD still have the file.
+    if (response.status !== 404 && response.status !== 410) return false;
+    // Some servers 404 every HEAD while GET works (google.com/maps/embed
+    // does), so a HEAD "gone" is confirmed with a GET before the reference
+    // is dropped — a false positive here silently deletes embeds from the
+    // output.
+    const confirmation = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+    await confirmation.body?.cancel();
+    return confirmation.status === 404 || confirmation.status === 410;
+  };
+
   await Promise.all(
     urls.map(async (url) => {
       try {
-        const response = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
-        // Only a definite "gone" counts: servers that reject HEAD still have the file.
-        if (response.status === 404 || response.status === 410) unavailable.add(url);
-        log.trace("probeRemoteReferences", { url, status: response.status });
+        const gone = await isGone(url);
+        if (gone) unavailable.add(url);
+        log.trace("probeRemoteReferences", { url, gone });
       } catch (err) {
         // A failed probe is no proof that the resource is gone: Chromium loads
         // it with a browser user agent, which many sites accept where a HEAD

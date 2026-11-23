@@ -17,7 +17,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import puppeteer from "puppeteer-core";
+import puppeteer, { type ElementHandle, type Page } from "puppeteer-core";
 import { PDFDocument } from "pdf-lib";
 import log from "loglevel";
 import { chromeArgs, resolveBrowserExecutable } from "./chrome.js";
@@ -93,6 +93,31 @@ export type RenderPdfResult = {
 };
 
 const DEFAULT_TIMEOUT_MS = 300_000;
+
+/**
+ * Injected via `evaluateOnNewDocument` so it runs in EVERY frame before its
+ * own scripts — including cross-origin embeds (google maps/street view
+ * iframes), which the HTML-injected runtime script cannot reach. Without
+ * `preserveDrawingBuffer` their WebGL canvases print as cleared (white)
+ * buffers even though the browser shows them composited.
+ */
+export function buildGlPreserveScript(): string {
+  return `(function(){
+  if (window.__vivGlPreserve) return;
+  window.__vivGlPreserve = true;
+  try {
+    var origGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+      if (typeof type === "string" && /^webgl/.test(type)) {
+        attrs = Object.assign({}, attrs || {});
+        attrs.preserveDrawingBuffer = true;
+        return origGetContext.call(this, type, attrs);
+      }
+      return origGetContext.call(this, type, attrs);
+    };
+  } catch (e) {}
+})();`;
+}
 
 /** The wrapper owns the producer/creator entries of every PDF it prints. */
 const TOOL_IDENTITY = "vivliostyle-batch-cli";
@@ -398,6 +423,59 @@ export function summarizeCapabilities(caps: FrameRenderCapability[]): string {
     .join(" | ");
 }
 
+/**
+ * Opt-in (`window.__vivRasterizeIframes = true` in the page): cross-origin
+ * WebGL embeds (google maps / street view) render into a worker-backed canvas
+ * whose backing store reads back black in the main frame. Vivliostyle's
+ * paginated copy therefore prints a black/empty frame, while the browser
+ * composites the panorama correctly on screen. Snapshot the composited
+ * region with a screenshot and swap in an image at the same CSS size before
+ * printing. The capture scale follows --pixel-ratio, so the print carries
+ * the same extra resolution as HiDPI canvas redraws.
+ */
+async function rasterizeIframesForPrint(page: Page, scale: number): Promise<void> {
+  for (const frame of page.frames()) {
+    let enabled = false;
+    let elements: ElementHandle<Element>[] = [];
+    try {
+      enabled = await frame.evaluate(() => (window as { __vivRasterizeIframes?: boolean }).__vivRasterizeIframes === true);
+      if (enabled) elements = await frame.$$("iframe");
+    } catch {
+      continue;
+    }
+    if (!enabled || elements.length === 0) continue;
+
+    for (let index = 0; index < elements.length; index++) {
+      try {
+        const box = await elements[index].boundingBox();
+        if (box === null || box.width < 2 || box.height < 2) continue;
+        const image = await page.screenshot({
+          clip: { x: box.x, y: box.y, width: box.width, height: box.height, scale },
+          encoding: "base64",
+          captureBeyondViewport: true
+        });
+        await frame.evaluate(
+          (params: { index: number; data: string; width: number; height: number }) => {
+            const original = document.querySelectorAll("iframe")[params.index];
+            if (original === undefined) return;
+            const img = document.createElement("img");
+            img.src = `data:image/png;base64,${params.data}`;
+            img.width = Math.round(params.width);
+            img.height = Math.round(params.height);
+            original.replaceWith(img);
+          },
+          { index, data: image, width: box.width, height: box.height }
+        );
+        log.info(
+          `[render] rasterized iframe ${index} for print (${Math.round(box.width * scale)}x${Math.round(box.height * scale)} @ ${scale}x)`
+        );
+      } catch (err) {
+        log.warn(`[render] iframe rasterization failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+}
+
 export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfResult> {
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const executablePath = resolveBrowserExecutable(request.chromeExecutable);
@@ -430,6 +508,12 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
     const page = await browser.newPage();
     page.setDefaultTimeout(timeoutMs);
     page.setDefaultNavigationTimeout(timeoutMs);
+
+    // The WebGL preserve fix has to be in place before ANY frame runs its
+    // scripts: the HTML-injected runtime script only covers the top document,
+    // while google maps/street view embeds boot their WebGL contexts inside
+    // their own cross-origin document.
+    await page.evaluateOnNewDocument(buildGlPreserveScript());
 
     page.on("pageerror", (err: unknown) => log.warn(`[render] page error: ${err instanceof Error ? err.message : String(err)}`));
     // Viewer and page errors are the usual reason a render produces nothing.
@@ -523,6 +607,8 @@ export async function renderPdf(request: RenderPdfRequest): Promise<RenderPdfRes
     } catch (err) {
       log.warn(`[render] pre-print probe failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    await rasterizeIframesForPrint(page, request.canvasScale ?? 1);
 
     const pdf = await page.pdf({
       margin: { top: 0, bottom: 0, left: 0, right: 0 },

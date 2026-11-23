@@ -18,6 +18,9 @@
  *   dataset and render only after the response arrives,
  * - lazy-loaded images,
  * - wasm, three.js/WebGL and deferred/async/module script mixes,
+ * - the blog's real google street view embed — the one network-dependent
+ *   case, skipped offline — proved by a differential render against a
+ *   control page (site isolation is disabled for exactly these frames),
  * - PDF/A-2b labeled output (PDF 1.7, XMP identification) passing the
  *   built-in validation and the full verapdf rule set.
  *
@@ -26,8 +29,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as mupdf from "mupdf";
 import { parseArgs, execute } from "../src/vivliostyle-cli.js";
@@ -38,7 +40,10 @@ import { VENDOR_MAP } from "./render-fixtures.test.js";
 
 const PAGES_DIR = resolve(__dirname, "render-fixtures/pages");
 const FIXTURE_ROOT = resolve(__dirname, "render-fixtures");
-const OUTPUT_DIR = mkdtempSync(join(tmpdir(), "vivliostyle-e2e-"));
+// Repo-local and gitignored (/pdf/): keep every rendered PDF for local review
+// instead of scattering them across temp dirs. Not part of the site showcase.
+const OUTPUT_DIR = resolve(__dirname, "../pdf/e2e");
+mkdirSync(OUTPUT_DIR, { recursive: true });
 
 // Fail hard, by design: without a browser binary these tests cannot do their
 // job and must be loud about it.
@@ -65,8 +70,8 @@ function renderArgs(name: string): string[] {
   return args;
 }
 
-async function renderPages(name: string, argv: string[] = []): Promise<string> {
-  const output = join(OUTPUT_DIR, `${name}.pdf`);
+async function renderPages(name: string, argv: string[] = [], outputSuffix = ""): Promise<string> {
+  const output = join(OUTPUT_DIR, `${name}${outputSuffix}.pdf`);
   const parsed = parseArgs([
     "node",
     "vivliostyle-batch-cli",
@@ -114,6 +119,46 @@ function nonWhiteShare(pixmap: mupdf.Pixmap): number {
     }
   }
   return nonWhite / samples;
+}
+
+/**
+ * Differential frame analysis over two renders of otherwise identical
+ * pages: the share of sampled pixels that differ meaningfully (the iframe
+ * box), and the share of those differing samples in the sky-blue /
+ * ground-green pano hue ranges. The color gate keeps a gray placeholder or
+ * a consent page — which differ from the control, too — from passing.
+ */
+function diffStats(a: mupdf.Pixmap, b: mupdf.Pixmap): { share: number; colorShare: number } {
+  if (a.getWidth() !== b.getWidth() || a.getHeight() !== b.getHeight()) throw new Error("pixmap size mismatch");
+  const pixelsA = a.getPixels();
+  const pixelsB = b.getPixels();
+  const width = a.getWidth();
+  const height = a.getHeight();
+  const components = a.getNumberOfComponents() + a.getAlpha();
+  let differing = 0;
+  let colorful = 0;
+  let samples = 0;
+  for (let y = 0; y < height; y += 7) {
+    for (let x = 0; x < width; x += 7) {
+      const offset = (y * width + x) * components;
+      const delta = Math.max(
+        Math.abs(pixelsA[offset] - pixelsB[offset]),
+        Math.abs(pixelsA[offset + 1] - pixelsB[offset + 1]),
+        Math.abs(pixelsA[offset + 2] - pixelsB[offset + 2])
+      );
+      if (delta > 16) {
+        differing++;
+        const red = pixelsA[offset];
+        const green = pixelsA[offset + 1];
+        const blue = pixelsA[offset + 2];
+        const isBlue = blue > 140 && blue > red + 30 && blue >= green;
+        const isGreen = green > 100 && green > red + 20 && green > blue + 20;
+        if (isBlue || isGreen) colorful++;
+      }
+      samples++;
+    }
+  }
+  return { share: differing / samples, colorShare: differing === 0 ? 0 : colorful / differing };
 }
 
 describe("e2e render (real Chrome)", () => {
@@ -248,8 +293,71 @@ describe("e2e render (real Chrome)", () => {
     pdf.document.destroy();
   }, 120_000);
 
+  it("google street view iframe renders full-width at 2x DPI into the PDF (diff vs control)", async (ctx) => {
+    // The real embed is the suite's one network dependency: skip offline
+    // instead of failing hard (a missing Chrome still fails in beforeAll).
+    try {
+      await fetch("https://www.google.com/generate_204", { signal: AbortSignal.timeout(5000) });
+    } catch {
+      ctx.skip(true, "google street view test needs network — generate_204 unreachable");
+    }
+    // The blog's own recipe: --fetch-missing (implies --allow-remote, so the
+    // unmapped google.com src survives the offline-by-default drop), a raised
+    // wait deadline for the WebGL boot, and --pixel-ratio 2 to check the
+    // composited iframe snapshot carries high-DPI print resolution.
+    const options = ["--fetch-missing", "--pixel-ratio", "2", "--wait-for-content", "12000"];
+    const embed = await renderPages("16-streetview-iframe.html", options);
+    const control = await renderPages("16-streetview-control.html", options);
+    const withEmbed = openPdf(embed);
+    const withoutEmbed = openPdf(control);
+    expect(withEmbed.document.countPages()).toBe(1);
+    expect(withoutEmbed.document.countPages()).toBe(1);
+    const diff = diffStats(withEmbed.pixmap(0), withoutEmbed.pixmap(0));
+    // A dropped embed (offline-by-default or a false "gone" probe) renders
+    // pixel-identical to the control: share=0. The panorama's daylight hues
+    // dominate the differing pixels; a consent page or error tile would not.
+    expect(diff.share).toBeGreaterThan(0.05);
+    expect(diff.colorShare).toBeGreaterThan(0.5);
+    // The panorama snapshot is captured at --pixel-ratio resolution: the
+    // iframe is ~718 CSS px wide, so the image XObject must be ~1436 px.
+    const resources = withEmbed.document.loadPage(0).getObject().get("Resources").resolve().get("XObject");
+    const images: { width: number; height: number }[] = [];
+    if (resources.isDictionary()) {
+      resources.forEach((value: mupdf.PDFObject) => {
+        const object = value.resolve();
+        if (object.get("Subtype").asName() !== "Image") return;
+        const width = object.get("Width").asNumber();
+        const height = object.get("Height").asNumber();
+        if (width > 2 && height > 2) images.push({ width, height });
+      });
+    }
+    expect(
+      images.some((image) => image.width >= 1400 && image.height >= 890),
+      "2x DPI panorama image"
+    ).toBe(true);
+    // width="100%": the panorama's blue sky reaches both edges of the A4
+    // content box (1cm margins on a 596pt-wide page), not a corner tile.
+    const pixmap = withEmbed.pixmap(0);
+    const pixels = pixmap.getPixels();
+    const components = pixmap.getNumberOfComponents() + pixmap.getAlpha();
+    let minX = pixmap.getWidth();
+    let maxX = 0;
+    for (let y = 0; y < pixmap.getHeight(); y += 7) {
+      for (let x = 0; x < pixmap.getWidth(); x += 7) {
+        const offset = (y * pixmap.getWidth() + x) * components;
+        if (pixels[offset + 2] > 140 && pixels[offset + 2] > pixels[offset] + 30 && pixels[offset + 2] >= pixels[offset + 1]) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+        }
+      }
+    }
+    expect(maxX - minX).toBeGreaterThan((pixmap.getWidth() - 2 * (72 / 2.54)) * 0.8);
+    withEmbed.document.destroy();
+    withoutEmbed.document.destroy();
+  }, 300_000);
+
   it("PDF/A-2b labeled output passes the built-in validation and verapdf", async () => {
-    const output = await renderPages("06-canvas-hires.html", ["--pdfa", "2b", "--verapdf"]);
+    const output = await renderPages("06-canvas-hires.html", ["--pdfa", "2b", "--verapdf"], "-pdfa-2b");
     // The build itself already validated (built-in checks + verapdf via
     // --verapdf); assert the artifacts here so a regression fails loudly.
     expect(readFileSync(output).subarray(0, 8).toString()).toBe("%PDF-1.7");

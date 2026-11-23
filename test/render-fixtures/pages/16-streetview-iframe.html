@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: google street view iframe (real embed)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>google street view iframe fixture (real embed)</h1>
+    <!-- The one deliberate network exception in the fixture set: the src is
+         the blog's real street view embed url (marmolada post), left unmapped
+         so Chrome loads it from google.com exactly like the production build.
+         The embed attributes mirror the posts; src/render/chrome.ts
+         disables site isolation precisely so these cross-origin frames
+         rasterize into printToPDF. Requires --fetch-missing/--allow-remote
+         (offline by default drops it) plus network — the e2e test diffs this
+         page against 16-streetview-control.html to isolate the embed's
+         pixels, so the parent stays bare on purpose. -->
+    <iframe
+      src="https://www.google.com/maps/embed?pb=!4v1726427311620!6m8!1m7!1sCAoSLEFGMVFpcE1hWDRoN0Z5NExFdlpaSFFQUXh4NV9MZ3g0aHRYY1d0d0NKMWVS!2m2!1d46.495287!2d11.7513511!3f98.78276099443083!4f4.4556945190209944!5f1.4219312166764295"
+      width="100%"
+      height="450"
+      style="border: 0"
+      allowfullscreen=""
+      loading="lazy"
+      referrerpolicy="strict-origin-when-cross-origin"
+    ></iframe>
+    <script>
+      window.__vivFixture = "streetview-iframe";
+      window.__vivReady = false;
+      // The pano renders in a worker-backed WebGL canvas: its backing store
+      // reads back black, so the tool snapshots the composited iframe and
+      // prints it as an image (at --pixel-ratio resolution).
+      window.__vivRasterizeIframes = true;
+      // The embed's iframe load event fires before the panorama's WebGL
+      // first frame lands, and the embed UI alone is mostly white. Hold
+      // the gate briefly after load so a painted pano is what gets printed
+      // (the cross-origin child document cannot be polled from here).
+      document.querySelector("iframe").addEventListener("load", function () {
+        setTimeout(function () {
+          window.__vivReady = true;
+        }, 5000);
+      });
+      setTimeout(function () {
+        window.__vivReady = true;
+      }, 15000);
+    </script>
+  </body>
+</html>

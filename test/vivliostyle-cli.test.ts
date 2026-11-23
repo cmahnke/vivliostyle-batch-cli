@@ -733,6 +733,31 @@ describe("vivliostyle-cli", () => {
     expect(referencesToProbe(`${ASSETS.remoteImage}`, assetBases)).toBe(true);
   });
 
+  it("probeRemoteReferences confirms a HEAD 404 with GET before dropping (google maps embed)", async () => {
+    const { probeRemoteReferences } = await import("../src/vivliostyle-cli");
+    const calls: { url: string; method: string }[] = [];
+    const statuses = new Map<string, { head: number; get: number }>();
+    const origFetch = globalThis.fetch;
+    (globalThis.fetch as unknown) = (async (url: string | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push({ url: String(url), method });
+      const status = statuses.get(String(url))![method === "HEAD" ? "head" : "get"];
+      return { status, body: null } as unknown as Response;
+    }) as typeof fetch;
+    try {
+      // google.com/maps/embed 404s every HEAD while GET returns 200.
+      statuses.set("https://embed.example/head404-get200", { head: 404, get: 200 });
+      statuses.set("https://embed.example/head404-get404", { head: 404, get: 404 });
+      statuses.set("https://embed.example/head200", { head: 200, get: 200 });
+      const unavailable = await probeRemoteReferences([...statuses.keys()]);
+      expect(unavailable).toEqual(new Set(["https://embed.example/head404-get404"]));
+      expect(calls.filter((call) => call.url.endsWith("head404-get200")).map((call) => call.method)).toEqual(["HEAD", "GET"]);
+      expect(calls.filter((call) => call.url.endsWith("head200")).map((call) => call.method)).toEqual(["HEAD"]);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   it("opens collapsed <details> for the PDF but not for the preview", async () => {
     const { buildRuntimeScript } = await import("../src/vivliostyle-cli");
     const options = { origin: SERVER_BASE_URL, documentBaseUrl: `${SERVER_BASE_URL}/`, gate: null };

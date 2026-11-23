@@ -53,7 +53,9 @@ export const FIXTURE_PAGES = [
   "13-graph-data.json",
   "14-remote-iframe.html",
   "14-remote-child.html",
-  "15-columns-span-columns.html"
+  "15-columns-span-columns.html",
+  "16-streetview-iframe.html",
+  "16-streetview-control.html"
 ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
@@ -91,7 +93,8 @@ describe("render fixtures (mocked, offline)", () => {
       "11-custom-element-data.html",
       "12-lazy-images.html",
       "13-canvas-graph.html",
-      "14-remote-iframe.html"
+      "14-remote-iframe.html",
+      "16-streetview-iframe.html"
     ]) {
       const html = readFileSync(join(PAGES_DIR, page), "utf-8");
       expect(html, `${page} sets __vivReady`).toContain("__vivReady");
@@ -172,6 +175,30 @@ describe("render fixtures (mocked, offline)", () => {
     // --asset-base exactly like the blog's google maps embed iframes.
     expect(html).toContain('src="https://fixture.example.test/pages/14-remote-child.html"');
     expect(readFileSync(join(PAGES_DIR, "14-remote-child.html"), "utf-8")).toContain("remote child mock 42");
+  });
+
+  it("streetview fixture embeds the blog's real google street view iframe (network exception)", () => {
+    const html = readFileSync(join(PAGES_DIR, "16-streetview-iframe.html"), "utf-8");
+    // The src is the REAL blog embed url — the one deliberate network
+    // dependency in the fixture set. Site isolation is disabled (see
+    // chrome.ts) precisely so these cross-origin frames rasterize into the
+    // print; the embed markup mirrors the posts byte-for-byte.
+    expect(html).toContain('src="https://www.google.com/maps/embed?pb=');
+    expect(html).toContain("maps/embed?pb=!4v");
+    expect(html).toContain('width="100%"');
+    expect(html).toContain('height="450"');
+    expect(html).toContain('allowfullscreen=""');
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain('referrerpolicy="strict-origin-when-cross-origin"');
+    // The pano is worker-rendered WebGL: the tool snapshots the composited
+    // iframe for print (at --pixel-ratio resolution) when the page opts in.
+    expect(html).toContain("__vivRasterizeIframes = true");
+    // The control twin is the same page minus the embed: the e2e render
+    // diff isolates the iframe's pixels against it.
+    const control = readFileSync(join(PAGES_DIR, "16-streetview-control.html"), "utf-8");
+    expect(control).not.toContain("<iframe");
+    expect(control).not.toContain("google.com");
+    expect(control).toContain("google street view iframe fixture");
   });
 
   it("deferred fixture loads its code with defer, async and as a module", () => {
@@ -267,6 +294,17 @@ describe("render hardening (chrome + pre-print + settle)", () => {
     expect(args).toContain("--enable-unsafe-swiftshader");
     expect(args).toContain("--use-angle=swiftshader");
     expect(args).toContain("--enable-unsafe-webgpu");
+  });
+
+  it("gl-preserve script patches contexts before frame scripts run (cross-origin embeds)", async () => {
+    const { buildGlPreserveScript } = await import("../src/render/pdf.js");
+    const script = buildGlPreserveScript();
+    // Cross-origin embeds (google maps/street view) boot their WebGL contexts
+    // in their own document; the HTML-injected runtime script cannot reach
+    // them, so this patch ships via evaluateOnNewDocument (all frames).
+    expect(script).toContain("preserveDrawingBuffer = true");
+    expect(script).toContain("__vivGlPreserve");
+    expect(script).toContain("/^webgl/.test(type)");
   });
 
   it("frame probe script scrolls embeds and calls __vivResize(factor)", async () => {
