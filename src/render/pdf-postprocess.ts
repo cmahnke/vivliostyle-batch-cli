@@ -22,11 +22,12 @@
  * (src/output/pdfx.ts, pdf-document.ts, pdf-version.ts at v11.4).
  */
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as mupdf from "mupdf";
+import log from "loglevel";
 import { buildXmpPacket, pdfDateToXmpDate, toXmpDate, xmpDateToPdfDate, type PdfLabel } from "./xmp.js";
 
 /** Document metadata written to the information dictionary and the XMP packet. */
@@ -181,6 +182,208 @@ function withTrailer<T>(document: mupdf.PDFDocument, scope: Scope, fn: (trailer:
   return fn(scope.track(document.getTrailer()));
 }
 
+// ── Destination names over the PDF/A name length limit ─────────────────────
+
+/**
+ * ISO 19005 forbids any name object longer than 127 bytes (ISO 19005-2:2011,
+ * 6.1.13). The Vivliostyle viewer names the destinations it creates for
+ * document-internal links after the full source URL — `viv-id-` plus the URL
+ * with colons escaped plus the fragment, e.g.
+ * `viv-id-http:003a:...:002farticle:002ehtml:0023fn:003a1` — so a document
+ * served under a long path produces names past that limit and the printed
+ * PDF fails veraPDF validation (footnote links are the common trigger).
+ */
+export const MAX_PDF_NAME_BYTES = 127;
+
+/** Prefix the viewer puts on every generated destination name. */
+const DESTINATION_PREFIX = "viv-id-";
+
+/** Digest characters kept from the SHA-1 of the replaced name. */
+const SHORT_DIGEST_CHARS = 20;
+
+/**
+ * Rewrites every destination name longer than `maxLength` bytes to
+ * `viv-id-<digest>` (27 bytes), applied consistently to every place a
+ * destination name can appear — the catalog /Dests dictionary, the
+ * /Names/Dests name tree, link annotations (/Dest and GoTo actions),
+ * outlines and the catalog /OpenAction — so the links keep working.
+ * Shorter names are left untouched.
+ *
+ * Returns the applied renames (old name → new name), empty when nothing
+ * exceeded the limit.
+ */
+export function shortenLongDestinationNames(
+  document: mupdf.PDFDocument,
+  scope: Scope,
+  maxLength: number = MAX_PDF_NAME_BYTES
+): Map<string, string> {
+  const catalog = scope.track(scope.track(document.getTrailer()).get("Root"));
+  // Every destination name in the document, so generated names cannot
+  // collide with an existing one.
+  const known = new Set<string>();
+  const renames = new Map<string, string>();
+
+  const noteName = (name: string): void => {
+    known.add(name);
+    // Written names are ASCII for everything the viewer generates, so the
+    // UTF-8 length is the length veraPDF sees; names needing another
+    // encoding exceed the limit even sooner.
+    if (Buffer.byteLength(name, "utf8") > maxLength) renames.set(name, "");
+  };
+  const noteNameObject = (object: mupdf.PDFObject): void => {
+    if (object.isName()) noteName(object.asName());
+  };
+  const noteAction = (action: mupdf.PDFObject): void => {
+    if (!action.isDictionary()) return;
+    const kind = scope.track(action.get("S"));
+    if (!kind.isName() || (kind.asName() !== "GoTo" && kind.asName() !== "GoToR")) return;
+    noteNameObject(scope.track(action.get("D")));
+  };
+
+  // ── Collection: definition and reference sites ──────────────────────────
+  const dests = scope.track(catalog.get("Dests"));
+  if (dests.isDictionary()) {
+    dests.forEach((_value, key) => {
+      if (typeof key === "string") noteName(key);
+    });
+  }
+  const collectNameTree = (node: mupdf.PDFObject): void => {
+    if (!node.isDictionary()) return;
+    const entries = scope.track(node.get("Names"));
+    if (entries.isArray()) {
+      for (let index = 0; index + 1 < entries.length; index += 2) {
+        noteNameObject(scope.track(entries.get(index)));
+      }
+    }
+    const kids = scope.track(node.get("Kids"));
+    if (kids.isArray()) {
+      for (let index = 0; index < kids.length; index++) collectNameTree(scope.track(kids.get(index)));
+    }
+  };
+  const namesRoot = scope.track(catalog.get("Names"));
+  if (namesRoot.isDictionary()) collectNameTree(scope.track(namesRoot.get("Dests")));
+  const pageCount = document.countPages();
+  const collectAnnots = (rename: (annot: mupdf.PDFObject) => void): void => {
+    for (let index = 0; index < pageCount; index++) {
+      const page = scope.track(document.loadPage(index));
+      const pageDict = scope.track(page.getObject());
+      const annots = scope.track(pageDict.get("Annots"));
+      if (!annots.isArray()) continue;
+      for (let annotIndex = 0; annotIndex < annots.length; annotIndex++) {
+        const annot = scope.track(annots.get(annotIndex));
+        if (!annot.isDictionary()) continue;
+        rename(annot);
+      }
+    }
+  };
+  collectAnnots((annot) => {
+    noteNameObject(scope.track(annot.get("Dest")));
+    noteAction(scope.track(annot.get("A")));
+  });
+  const outlines = scope.track(catalog.get("Outlines"));
+  if (outlines.isDictionary()) {
+    let item = scope.track(outlines.get("First"));
+    for (let depth = 0; item.isDictionary() && depth < 4096; depth++) {
+      noteNameObject(scope.track(item.get("Dest")));
+      noteAction(scope.track(item.get("A")));
+      item = scope.track(item.get("Next"));
+    }
+  }
+  const openAction = scope.track(catalog.get("OpenAction"));
+  if (openAction.isDictionary()) noteAction(openAction);
+  else noteNameObject(openAction);
+
+  if (renames.size === 0) return renames;
+
+  // ── Short names: `viv-id-` plus a digest of the replaced name ───────────
+  for (const name of renames.keys()) {
+    const digest = createHash("sha1").update(name, "utf8").digest("base64url");
+    let candidate = `${DESTINATION_PREFIX}${digest.slice(0, SHORT_DIGEST_CHARS)}`;
+    for (let suffix = 2; known.has(candidate); suffix++) {
+      candidate = `${DESTINATION_PREFIX}${digest.slice(0, SHORT_DIGEST_CHARS)}-${suffix}`;
+    }
+    known.add(candidate);
+    renames.set(name, candidate);
+  }
+
+  const renameNamedValue = (container: mupdf.PDFObject, key: string): void => {
+    const value = scope.track(container.get(key));
+    if (!value.isName()) return;
+    const to = renames.get(value.asName());
+    if (to !== undefined) container.put(key, document.newName(to));
+  };
+  const renameAction = (action: mupdf.PDFObject): void => {
+    if (!action.isDictionary()) return;
+    const kind = scope.track(action.get("S"));
+    if (!kind.isName() || (kind.asName() !== "GoTo" && kind.asName() !== "GoToR")) return;
+    renameNamedValue(action, "D");
+  };
+
+  // ── Application ─────────────────────────────────────────────────────────
+  // Old-style /Dests dictionary: move each renamed entry to its new key. The
+  // value keeps its identity, including indirect references.
+  if (dests.isDictionary()) {
+    for (const [from, to] of renames) {
+      const value = scope.track(dests.get(from));
+      if (value.isNull()) continue;
+      dests.put(to, value);
+      dests.delete(from);
+    }
+  }
+  // /Names/Dests name tree: a renamed key can fall outside its node's
+  // /Limits range, so instead of per-node bookkeeping the tree collapses
+  // into one flat, sorted Names array at its root.
+  if (namesRoot.isDictionary()) {
+    const tree = scope.track(namesRoot.get("Dests"));
+    if (tree.isDictionary()) {
+      const pairs: Array<{ name: string; value: mupdf.PDFObject }> = [];
+      const collectPairs = (node: mupdf.PDFObject): void => {
+        if (!node.isDictionary()) return;
+        const entries = scope.track(node.get("Names"));
+        if (entries.isArray()) {
+          for (let index = 0; index + 1 < entries.length; index += 2) {
+            const key = scope.track(entries.get(index));
+            if (key.isName()) pairs.push({ name: key.asName(), value: scope.track(entries.get(index + 1)) });
+          }
+        }
+        const kids = scope.track(node.get("Kids"));
+        if (kids.isArray()) {
+          for (let index = 0; index < kids.length; index++) collectPairs(scope.track(kids.get(index)));
+        }
+      };
+      collectPairs(tree);
+      if (pairs.some((pair) => renames.has(pair.name))) {
+        const sorted = pairs
+          .map((pair) => ({ ...pair, name: renames.get(pair.name) ?? pair.name }))
+          .sort((a, b) => Buffer.compare(Buffer.from(a.name, "utf8"), Buffer.from(b.name, "utf8")));
+        const flat = scope.track(document.newArray());
+        for (const pair of sorted) {
+          flat.push(document.newName(pair.name));
+          flat.push(pair.value);
+        }
+        tree.put("Names", flat);
+        tree.delete("Kids");
+      }
+    }
+  }
+  collectAnnots((annot) => {
+    renameNamedValue(annot, "Dest");
+    renameAction(scope.track(annot.get("A")));
+  });
+  if (outlines.isDictionary()) {
+    let item = scope.track(outlines.get("First"));
+    for (let depth = 0; item.isDictionary() && depth < 4096; depth++) {
+      renameNamedValue(item, "Dest");
+      renameAction(scope.track(item.get("A")));
+      item = scope.track(item.get("Next"));
+    }
+  }
+  if (openAction.isDictionary()) renameAction(openAction);
+  else renameNamedValue(catalog, "OpenAction");
+
+  return renames;
+}
+
 /**
  * Applies metadata and standards labeling to a printed PDF.
  *
@@ -195,6 +398,12 @@ export async function postProcessPdf(pdf: Uint8Array, options: PostProcessOption
   try {
     const { metadata, label } = options;
     const document = openPdfDocument(pdf, scope);
+
+    // ── Destination names over the PDF/A name length limit ────────────────
+    const renames = shortenLongDestinationNames(document, scope);
+    if (renames.size > 0) {
+      log.info(`[pdf] shortened ${renames.size} destination name(s) over the ${MAX_PDF_NAME_BYTES}-byte name limit`);
+    }
 
     // ── What the print backend already wrote ────────────────────────────────
     const { creationDate, modifyDate, trapped } = withInfo(document, scope, (info) => ({

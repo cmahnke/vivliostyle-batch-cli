@@ -8,7 +8,14 @@ import { PDFDocument } from "pdf-lib";
 import * as mupdf from "mupdf";
 import { JSDOM } from "jsdom";
 import { buildXmpPacket, pdfDateToXmpDate, toXmpDate, xmpDateToPdfDate } from "../src/render/xmp.js";
-import { loadDefaultIccProfile, minimumVersionForLabel, parseExplicitDate, postProcessPdf } from "../src/render/pdf-postprocess.js";
+import {
+  loadDefaultIccProfile,
+  MAX_PDF_NAME_BYTES,
+  minimumVersionForLabel,
+  parseExplicitDate,
+  postProcessPdf,
+  shortenLongDestinationNames
+} from "../src/render/pdf-postprocess.js";
 import { validateLabeledPdf } from "../src/render/pdf-validate.js";
 import { runVeraPdf, veraPdfFlavour } from "../src/render/verapdf.js";
 import {
@@ -311,6 +318,169 @@ describe("postProcessPdf", () => {
     });
     const { catalog } = openPdf(stamped);
     expect(catalog.get("OutputIntents").isNull()).toBe(true);
+  });
+});
+
+describe("shortenLongDestinationNames", () => {
+  /** Destination name the viewer would generate for a long article path. */
+  const longNameFor = (fragment: string): string =>
+    `viv-id-http:003a:002f:002f127:002e0:002e0:002e1:003a55298:002fpost:002f` +
+    `a-post-slug-long-enough-to-exceed-the-pdf-name-limit:002farticle:002ehtml:0023${fragment}`;
+
+  function destinationNames(document: mupdf.PDFDocument): string[] {
+    const names: string[] = [];
+    document
+      .getTrailer()
+      .get("Root")
+      .get("Dests")
+      .forEach((_value, key) => {
+        if (typeof key === "string") names.push(key);
+      });
+    return names;
+  }
+
+  /** Minimal PDF with a /Dests dictionary and link annotations, Skia-style. */
+  async function pdfWithDestinations(): Promise<{ bytes: Uint8Array; longA: string; longB: string; keep: string }> {
+    const longA = longNameFor("fn:003a1");
+    const longB = longNameFor("fnref:003a1");
+    const keep = "Keep-Short";
+    const document = mupdf.PDFDocument.openDocument(await minimalPdf(), "application/pdf") as mupdf.PDFDocument;
+    const catalog = document.getTrailer().get("Root");
+    const page = document.loadPage(0).getObject();
+    const pageRef = catalog.get("Pages").get("Kids").get(0);
+
+    const dests = document.newDictionary();
+    dests.put(longA, [pageRef, "XYZ", 100, 200, 0]);
+    dests.put(longB, [0, "Fit"]);
+    dests.put(keep, [0, "Fit"]);
+    catalog.put("Dests", dests);
+
+    const link = document.newDictionary();
+    link.put("Type", "Annot");
+    link.put("Subtype", "Link");
+    link.put("Rect", [0, 0, 10, 10]);
+    link.put("Dest", longA);
+    link.put("A", { S: "GoTo", D: longB });
+    const shortLink = document.newDictionary();
+    shortLink.put("Type", "Annot");
+    shortLink.put("Subtype", "Link");
+    shortLink.put("Rect", [0, 0, 10, 10]);
+    shortLink.put("Dest", keep);
+    page.put("Annots", [link, shortLink]);
+
+    const saved = document.saveToBuffer("compress");
+    return { bytes: new Uint8Array(saved.asUint8Array()), longA, longB, keep };
+  }
+
+  const noScope = {
+    track: <T>(value: T): T => value,
+    dispose: () => undefined
+  };
+
+  it("renames over-long destinations consistently across the definition and every reference", async () => {
+    const { bytes, longA, longB, keep } = await pdfWithDestinations();
+    const output = await postProcessPdf(bytes, { metadata: { creator: "c", producer: "p" } });
+    const document = mupdf.PDFDocument.openDocument(output, "application/pdf") as mupdf.PDFDocument;
+    const dests = document.getTrailer().get("Root").get("Dests");
+    const names = destinationNames(document);
+
+    expect(names).toHaveLength(3);
+    expect(names).toContain(keep);
+    expect(names).not.toContain(longA);
+    expect(names).not.toContain(longB);
+    const renamed = names.filter((name) => name !== keep);
+    expect(renamed).toHaveLength(2);
+    for (const name of renamed) {
+      expect(name).toMatch(/^viv-id-/);
+      expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(MAX_PDF_NAME_BYTES);
+    }
+    // Distinct old names keep distinct new names.
+    expect(new Set(renamed).size).toBe(2);
+
+    // The page reference inside the destination survives the rename.
+    const withPage = renamed.find((name) => dests.get(name).length === 5);
+    expect(withPage).toBeDefined();
+    expect(
+      dests
+        .get(withPage as string)
+        .get(0)
+        .isIndirect()
+    ).toBe(true);
+
+    // The link annotation's /Dest and its GoTo action's /D follow the rename.
+    const annots = document.loadPage(0).getObject().get("Annots");
+    const linkDest = annots.get(0).get("Dest").asName();
+    const actionDest = annots.get(0).get("A").get("D").asName();
+    expect(renamed).toContain(linkDest);
+    expect(renamed).toContain(actionDest);
+    expect(linkDest).not.toBe(actionDest);
+    // Short names pass through untouched.
+    expect(annots.get(1).get("Dest").asName()).toBe(keep);
+  });
+
+  it("keeps names of exactly the limit and renames ones over it", async () => {
+    const atLimit = `viv-id-${"x".repeat(MAX_PDF_NAME_BYTES - 7)}`;
+    const overLimit = `viv-id-${"y".repeat(MAX_PDF_NAME_BYTES - 6)}`;
+    const document = mupdf.PDFDocument.openDocument(await minimalPdf(), "application/pdf") as mupdf.PDFDocument;
+    const dests = document.newDictionary();
+    dests.put(atLimit, [0, "Fit"]);
+    dests.put(overLimit, [0, "Fit"]);
+    document.getTrailer().get("Root").put("Dests", dests);
+    const saved = document.saveToBuffer("compress");
+    const output = await postProcessPdf(new Uint8Array(saved.asUint8Array()), { metadata: { creator: "c", producer: "p" } });
+    const names = destinationNames(mupdf.PDFDocument.openDocument(output, "application/pdf") as mupdf.PDFDocument);
+    expect(names).toContain(atLimit);
+    expect(names).not.toContain(overLimit);
+    expect(names.filter((name) => name !== atLimit)).toHaveLength(1);
+  });
+
+  it("collapses a /Names/Dests name tree with an over-long key into one flat sorted node", async () => {
+    const longA = longNameFor("fn:003a1");
+    const mid = "Mid-Dest";
+    const longB = `viv-id-${"z".repeat(130)}`;
+    const document = mupdf.PDFDocument.openDocument(await minimalPdf(), "application/pdf") as mupdf.PDFDocument;
+    const catalog = document.getTrailer().get("Root");
+    const kid = (names: Record<string, unknown[]>): mupdf.PDFObject => {
+      const node = document.newDictionary();
+      node.put("Names", names);
+      return node;
+    };
+    const tree = document.newDictionary();
+    tree.put("Kids", [kid({ [longA]: [0, "Fit"], [mid]: [0, "Fit"] }), kid({ [longB]: [0, "Fit"] })]);
+    const namesRoot = document.newDictionary();
+    namesRoot.put("Dests", tree);
+    catalog.put("Names", namesRoot);
+
+    const renames = shortenLongDestinationNames(document, noScope);
+    expect(renames.size).toBe(2);
+    expect(renames.has(longA)).toBe(true);
+    expect(renames.has(longB)).toBe(true);
+
+    const root = catalog.get("Names").get("Dests");
+    expect(root.get("Kids").isNull()).toBe(true);
+    const flat = root.get("Names");
+    expect(flat.isArray()).toBe(true);
+    expect(flat.length).toBe(4);
+    const keys = [flat.get(0).asName(), flat.get(2).asName()];
+    // Sorted ascending bytewise, with the untouched short name first.
+    expect(keys[0]).toBe(mid);
+    expect(keys[1].startsWith("viv-id-")).toBe(true);
+    expect(flat.get(3).asName().startsWith("viv-id-")).toBe(true);
+    expect(flat.get(1).isArray()).toBe(true);
+  });
+
+  it("returns an empty map when no name exceeds the limit", async () => {
+    const document = mupdf.PDFDocument.openDocument(await minimalPdf(), "application/pdf") as mupdf.PDFDocument;
+    expect(shortenLongDestinationNames(document, noScope).size).toBe(0);
+  });
+
+  it("leaves already-shortened output unchanged", async () => {
+    const { bytes } = await pdfWithDestinations();
+    const once = await postProcessPdf(bytes, { metadata: { creator: "c", producer: "p" } });
+    const twice = await postProcessPdf(once, { metadata: { creator: "c", producer: "p" } });
+    const firstNames = destinationNames(mupdf.PDFDocument.openDocument(once, "application/pdf") as mupdf.PDFDocument);
+    const secondNames = destinationNames(mupdf.PDFDocument.openDocument(twice, "application/pdf") as mupdf.PDFDocument);
+    expect(secondNames).toEqual(firstNames);
   });
 });
 
