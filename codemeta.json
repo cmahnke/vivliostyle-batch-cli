@@ -2,7 +2,7 @@
   "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
   "@type": "SoftwareSourceCode",
   "name": "vivliostyle-batch-cli",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "dateReleased": "2026-11-23",
   "description": "A vivliostyle-cli with more options for batch processing",
   "identifier": "https://github.com/cmahnke/vivliostyle-batch-cli",
