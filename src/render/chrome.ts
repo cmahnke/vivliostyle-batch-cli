@@ -77,16 +77,16 @@ export function resolveBrowserExecutable(explicit?: string | undefined): string 
 
 /**
  * Chrome flags for headless rendering.
-  *
-  * SwiftShader keeps WebGL (three.js, A-Frame) working without a GPU, and the
-  * ANGLE/WebGPU flags extend that to WebGPU on headless machines (best effort:
-  * pages report `navigator.gpu == null` when the build still lacks it).
-  * `--disable-web-security` lets the page load the cross-origin embeds it shows.
-  * Site isolation is disabled (IsolateOrigins, site-per-process): out-of-process
-  * iframes (every cross-origin embed) do not rasterize into printToPDF at all,
-  * so Maps/Street View frames would print empty no matter how long they are
-  * given to boot.
-  */
+ *
+ * SwiftShader keeps WebGL (three.js, A-Frame) working without a GPU, and the
+ * ANGLE/WebGPU flags extend that to WebGPU on headless machines (best effort:
+ * pages report `navigator.gpu == null` when the build still lacks it).
+ * `--disable-web-security` lets the page load the cross-origin embeds it shows.
+ * Site isolation is disabled (IsolateOrigins, site-per-process): out-of-process
+ * iframes (every cross-origin embed) do not rasterize into printToPDF at all,
+ * so Maps/Street View frames would print empty no matter how long they are
+ * given to boot.
+ */
 export function chromeArgs(extra: string[] = []): string[] {
   return [
     "--disable-field-trial-config",

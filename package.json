@@ -14,6 +14,7 @@
     "build": "npx rimraf dist/* && npx rollup -c",
     "start": "node dist/vivliostyle-batch-cli.js",
     "format": "npx prettier . --check",
+    "format:fix": "npx prettier . --write",
     "clean": "npx rimraf dist/*",
     "lint": "npx tsc && eslint . -c eslint.config.mjs --report-unused-disable-directives --max-warnings 0",
     "site:collect": "node site/collect-manifest.mjs",
