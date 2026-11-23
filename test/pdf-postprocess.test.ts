@@ -440,13 +440,24 @@ describe("shortenLongDestinationNames", () => {
     const longB = `viv-id-${"z".repeat(130)}`;
     const document = mupdf.PDFDocument.openDocument(await minimalPdf(), "application/pdf") as mupdf.PDFDocument;
     const catalog = document.getTrailer().get("Root");
-    const kid = (names: Record<string, unknown[]>): mupdf.PDFObject => {
+    const kid = (names: Array<[string, unknown[]]>): mupdf.PDFObject => {
       const node = document.newDictionary();
-      node.put("Names", names);
+      const entries = document.newArray();
+      for (const [name, value] of names) {
+        entries.push(name);
+        entries.push(value);
+      }
+      node.put("Names", entries);
       return node;
     };
     const tree = document.newDictionary();
-    tree.put("Kids", [kid({ [longA]: [0, "Fit"], [mid]: [0, "Fit"] }), kid({ [longB]: [0, "Fit"] })]);
+    tree.put("Kids", [
+      kid([
+        [longA, [0, "Fit"]],
+        [mid, [0, "Fit"]]
+      ]),
+      kid([[longB, [0, "Fit"]]])
+    ]);
     const namesRoot = document.newDictionary();
     namesRoot.put("Dests", tree);
     catalog.put("Names", namesRoot);
@@ -460,13 +471,15 @@ describe("shortenLongDestinationNames", () => {
     expect(root.get("Kids").isNull()).toBe(true);
     const flat = root.get("Names");
     expect(flat.isArray()).toBe(true);
-    expect(flat.length).toBe(4);
-    const keys = [flat.get(0).asName(), flat.get(2).asName()];
+    expect(flat.length).toBe(6);
+    const keys = [flat.get(0).asName(), flat.get(2).asName(), flat.get(4).asName()];
     // Sorted ascending bytewise, with the untouched short name first.
     expect(keys[0]).toBe(mid);
     expect(keys[1].startsWith("viv-id-")).toBe(true);
-    expect(flat.get(3).asName().startsWith("viv-id-")).toBe(true);
+    expect(keys[2].startsWith("viv-id-")).toBe(true);
     expect(flat.get(1).isArray()).toBe(true);
+    expect(flat.get(3).isArray()).toBe(true);
+    expect(flat.get(5).isArray()).toBe(true);
   });
 
   it("returns an empty map when no name exceeds the limit", async () => {
