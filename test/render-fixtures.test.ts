@@ -55,7 +55,9 @@ export const FIXTURE_PAGES = [
   "14-remote-child.html",
   "15-columns-span-columns.html",
   "16-streetview-iframe.html",
-  "16-streetview-control.html"
+  "16-streetview-control.html",
+  "17-instagram-embed.html",
+  "17-instagram-control.html"
 ] as const;
 
 describe("render fixtures (mocked, offline)", () => {
@@ -94,7 +96,8 @@ describe("render fixtures (mocked, offline)", () => {
       "12-lazy-images.html",
       "13-canvas-graph.html",
       "14-remote-iframe.html",
-      "16-streetview-iframe.html"
+      "16-streetview-iframe.html",
+      "17-instagram-embed.html"
     ]) {
       const html = readFileSync(join(PAGES_DIR, page), "utf-8");
       expect(html, `${page} sets __vivReady`).toContain("__vivReady");
@@ -199,6 +202,37 @@ describe("render fixtures (mocked, offline)", () => {
     expect(control).not.toContain("<iframe");
     expect(control).not.toContain("google.com");
     expect(control).toContain("google street view iframe fixture");
+  });
+
+  it("instagram fixture embeds the blog's real instagram post (network exception)", () => {
+    const html = readFileSync(join(PAGES_DIR, "17-instagram-embed.html"), "utf-8");
+    // The markup mirrors the blog's insta shortcode: embeds.js replaces the
+    // blockquote with a cross-origin instagram.com iframe, the second
+    // deliberate network dependency in the fixture set (site isolation is
+    // disabled for exactly these frames — see chrome.ts).
+    expect(html).toContain('class="instagram-media"');
+    expect(html).toContain("data-instgrm-captioned");
+    expect(html).toContain('data-instgrm-version="14"');
+    expect(html).toContain(
+      'data-instgrm-permalink="https://www.instagram.com/p/CmG-hNesauQ/?utm_source=ig_embed&amp;utm_campaign=loading"'
+    );
+    // The blog's protocol-relative //platform... URL is spelled absolute here:
+    // that is what it resolves to on the HTTPS site, and the render tool
+    // rewrites protocol-relative URLs against --asset-base instead of loading
+    // them (see urlToStaticMapping in vivliostyle-cli.ts).
+    expect(html).toContain('<script async src="https://platform.instagram.com/en_US/embeds.js"></script>');
+    expect(html).toContain("View this post on Instagram");
+    expect(html).toContain("A post shared by Gemeinde Sylt (@gemeinde.sylt)");
+    // The embedded frame is composited as a pixel snapshot for print (at
+    // --pixel-ratio resolution) when the page opts in.
+    expect(html).toContain("__vivRasterizeIframes = true");
+    // The control twin is the same page minus the embed: the e2e render
+    // diff isolates the embedded post's pixels against it.
+    const control = readFileSync(join(PAGES_DIR, "17-instagram-control.html"), "utf-8");
+    expect(control).not.toContain("instagram-media");
+    expect(control).not.toContain("embeds.js");
+    expect(control).not.toContain("instagram.com");
+    expect(control).toContain("instagram embedded post fixture");
   });
 
   it("deferred fixture loads its code with defer, async and as a module", () => {

@@ -18,9 +18,10 @@
  *   dataset and render only after the response arrives,
  * - lazy-loaded images,
  * - wasm, three.js/WebGL and deferred/async/module script mixes,
- * - the blog's real google street view embed — the one network-dependent
- *   case, skipped offline — proved by a differential render against a
- *   control page (site isolation is disabled for exactly these frames),
+ * - the blog's real google street view embed and instagram post — the two
+ *   network-dependent cases, skipped offline — proved by differential
+ *   renders against control pages (site isolation is disabled for exactly
+ *   these frames),
  * - PDF/A-2b labeled output (PDF 1.7, XMP identification) passing the
  *   built-in validation and the full verapdf rule set.
  *
@@ -159,6 +160,22 @@ function diffStats(a: mupdf.Pixmap, b: mupdf.Pixmap): { share: number; colorShar
     }
   }
   return { share: differing / samples, colorShare: differing === 0 ? 0 : colorful / differing };
+}
+
+/** Intrinsic sizes of the image XObjects on a rendered page. */
+function imageSizes(pdf: ReturnType<typeof openPdf>, page: number): { width: number; height: number }[] {
+  const resources = pdf.document.loadPage(page).getObject().get("Resources").resolve().get("XObject");
+  const images: { width: number; height: number }[] = [];
+  if (resources.isDictionary()) {
+    resources.forEach((value: mupdf.PDFObject) => {
+      const object = value.resolve();
+      if (object.get("Subtype").asName() !== "Image") return;
+      const width = object.get("Width").asNumber();
+      const height = object.get("Height").asNumber();
+      if (width > 2 && height > 2) images.push({ width, height });
+    });
+  }
+  return images;
 }
 
 describe("e2e render (real Chrome)", () => {
@@ -320,17 +337,7 @@ describe("e2e render (real Chrome)", () => {
     expect(diff.colorShare).toBeGreaterThan(0.5);
     // The panorama snapshot is captured at --pixel-ratio resolution: the
     // iframe is ~718 CSS px wide, so the image XObject must be ~1436 px.
-    const resources = withEmbed.document.loadPage(0).getObject().get("Resources").resolve().get("XObject");
-    const images: { width: number; height: number }[] = [];
-    if (resources.isDictionary()) {
-      resources.forEach((value: mupdf.PDFObject) => {
-        const object = value.resolve();
-        if (object.get("Subtype").asName() !== "Image") return;
-        const width = object.get("Width").asNumber();
-        const height = object.get("Height").asNumber();
-        if (width > 2 && height > 2) images.push({ width, height });
-      });
-    }
+    const images = imageSizes(withEmbed, 0);
     expect(
       images.some((image) => image.width >= 1400 && image.height >= 890),
       "2x DPI panorama image"
@@ -352,6 +359,39 @@ describe("e2e render (real Chrome)", () => {
       }
     }
     expect(maxX - minX).toBeGreaterThan((pixmap.getWidth() - 2 * (72 / 2.54)) * 0.8);
+    withEmbed.document.destroy();
+    withoutEmbed.document.destroy();
+  }, 300_000);
+
+  it("instagram embedded post renders into the PDF at 2x DPI (diff vs control)", async (ctx) => {
+    // The real embed is the suite's other network dependency: skip offline
+    // instead of failing hard (a missing Chrome still fails in beforeAll).
+    try {
+      await fetch("https://www.instagram.com/p/CmG-hNesauQ/embed/captioned/", { signal: AbortSignal.timeout(5000) });
+    } catch {
+      ctx.skip(true, "instagram embed test needs network — instagram.com unreachable");
+    }
+    // The blog's own recipe: --fetch-missing (implies --allow-remote, so the
+    // unmapped platform.instagram.com / instagram.com URLs survive the
+    // offline-by-default drop), a raised wait deadline for embeds.js to swap
+    // the blockquote for its iframe, and --pixel-ratio 2 to check the
+    // composited snapshot carries high-DPI print resolution.
+    const options = ["--fetch-missing", "--pixel-ratio", "2", "--wait-for-content", "12000"];
+    const embed = await renderPages("17-instagram-embed.html", options);
+    const control = await renderPages("17-instagram-control.html", options);
+    const withEmbed = openPdf(embed);
+    const withoutEmbed = openPdf(control);
+    expect(withEmbed.document.countPages()).toBe(1);
+    expect(withoutEmbed.document.countPages()).toBe(1);
+    const diff = diffStats(withEmbed.pixmap(0), withoutEmbed.pixmap(0));
+    // A dropped embed (offline-by-default or a false "gone" probe) renders
+    // pixel-identical to the control: share=0. No color gate here: the post
+    // photo's palette is arbitrary, unlike streetview's daylight panorama.
+    expect(diff.share).toBeGreaterThan(0.05);
+    // The embed frame is ~400 CSS px wide, so its 2x snapshot must be ~800 px
+    // — and the post must actually paint pixels, not an empty white box.
+    expect(imageSizes(withEmbed, 0).some((image) => image.width >= 700 && image.height >= 400)).toBe(true);
+    expect(nonWhiteShare(withEmbed.pixmap(0))).toBeGreaterThan(nonWhiteShare(withoutEmbed.pixmap(0)) + 0.01);
     withEmbed.document.destroy();
     withoutEmbed.document.destroy();
   }, 300_000);

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: instagram embedded post (real embed)</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: serif;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>instagram embedded post fixture (real embed)</h1>
+    <!-- The one deliberate network exception for Instagram in the fixture
+         set: the blockquote and embeds.js script mirror the blog's insta
+         shortcode in the parts that identify the embed (the script URL is the
+         absolute form the blog's protocol-relative //platform... URL resolves
+         to on the HTTPS site — the render tool rewrites protocol-relative
+         URLs against --asset-base instead of loading them). The script
+         replaces the blockquote with a cross-origin instagram.com iframe;
+         src/render/chrome.ts disables site isolation so it rasterizes into
+         printToPDF. Requires --fetch-missing/--allow-remote (offline by
+         default drops it) plus network — the e2e test diffs this page against
+         17-instagram-control.html to isolate the embed's pixels. -->
+    <div style="position: relative; max-width: 400px; min-width: 100px">
+      <blockquote
+        class="instagram-media"
+        data-instgrm-captioned
+        data-instgrm-permalink="https://www.instagram.com/p/CmG-hNesauQ/?utm_source=ig_embed&amp;utm_campaign=loading"
+        data-instgrm-version="14"
+        style="
+          background: #fff;
+          border: 0;
+          border-radius: 3px;
+          box-shadow:
+            0 0 1px 0 rgba(0, 0, 0, 0.5),
+            0 1px 10px 0 rgba(0, 0, 0, 0.15);
+          margin: 1px;
+          max-width: 400px;
+          min-width: 326px;
+          padding: 0;
+          width: 99.375%;
+          width: -webkit-calc(100% - 2px);
+          width: calc(100% - 2px);
+        "
+      >
+        <div style="padding: 16px">
+          <a
+            href="https://www.instagram.com/p/CmG-hNesauQ/?utm_source=ig_embed&amp;utm_campaign=loading"
+            style="background: #ffffff; line-height: 0; padding: 0 0; text-align: center; text-decoration: none; width: 100%"
+            target="_blank"
+          >
+            <div style="padding: 19% 0"></div>
+            <div style="padding-top: 8px">
+              <div
+                style="
+                  color: #3897f0;
+                  font-family: Arial, sans-serif;
+                  font-size: 14px;
+                  font-style: normal;
+                  font-weight: 550;
+                  line-height: 18px;
+                "
+              >
+                View this post on Instagram
+              </div>
+            </div>
+            <div style="padding: 12.5% 0"></div>
+          </a>
+          <p
+            style="
+              color: #c9c8cd;
+              font-family: Arial, sans-serif;
+              font-size: 14px;
+              line-height: 17px;
+              margin-bottom: 0;
+              margin-top: 8px;
+              overflow: hidden;
+              padding: 8px 0 7px;
+              text-align: center;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            "
+          >
+            <a
+              href="https://www.instagram.com/p/CmG-hNesauQ/?utm_source=ig_embed&amp;utm_campaign=loading"
+              style="
+                color: #c9c8cd;
+                font-family: Arial, sans-serif;
+                font-size: 14px;
+                font-style: normal;
+                font-weight: normal;
+                line-height: 17px;
+                text-decoration: none;
+              "
+              target="_blank"
+              >A post shared by Gemeinde Sylt (@gemeinde.sylt)</a
+            >
+          </p>
+        </div>
+      </blockquote>
+      <script async src="https://platform.instagram.com/en_US/embeds.js"></script>
+    </div>
+    <script>
+      window.__vivFixture = "instagram-embed";
+      window.__vivReady = false;
+      // The embed is a cross-origin iframe created by embeds.js: its backing
+      // store reads back black, so the tool snapshots the composited frame and
+      // prints it as an image (at --pixel-ratio resolution).
+      window.__vivRasterizeIframes = true;
+      // embeds.js swaps the blockquote for the iframe after load: poll for it,
+      // then hold the gate briefly after its load so the post paints before
+      // print (the cross-origin child document cannot be polled from here).
+      var poll = setInterval(function () {
+        var frame = document.querySelector('iframe[src*="instagram.com"]');
+        if (frame === null) return;
+        clearInterval(poll);
+        frame.addEventListener("load", function () {
+          setTimeout(function () {
+            window.__vivReady = true;
+          }, 5000);
+        });
+        setTimeout(function () {
+          window.__vivReady = true;
+        }, 15000);
+      }, 200);
+      setTimeout(function () {
+        window.__vivReady = true;
+      }, 20000);
+    </script>
+  </body>
+</html>
